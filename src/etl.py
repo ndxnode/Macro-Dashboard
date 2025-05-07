@@ -11,7 +11,11 @@ fred = Fred(api_key=os.getenv("FRED_API_KEY"))
 INDICATORS = {
     'CPI': 'CPIAUCSL',
     'Unemployment Rate': 'UNRATE',
-    'Fed Funds Rate': 'FEDFUNDS'
+    'Fed Funds Rate': 'FEDFUNDS',
+    'GDP': 'GDP',
+    'Inflation': 'CPIAUCSL',
+    'PCE Price Index': 'PCEPI',
+    'Consumer Sentiment': 'UMCSENT'
 }
 
 def fetch_fred_data():
