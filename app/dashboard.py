@@ -11,6 +11,8 @@ from detect import get_anomalies_for_indicator
 
 DB_PATH = 'data/macro_data.db'
 app = dash.Dash(__name__)
+server = app.server
+
 
 def get_distinct_indicators():
     """Fetches distinct indicators from the macro_data table."""
@@ -164,4 +166,4 @@ def update_anomaly_table(selected_indicator):
     return anomalies_df.to_dict('records'), columns
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run_server(debug=True)
