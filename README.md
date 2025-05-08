@@ -48,14 +48,10 @@ Macro-Dashboard/
 
 ## Roadmap
 
-- Add multi-series comparison support
 - Integrate World Bank or OECD APIs
 - Deploy dashboard online (Render/Heroku)
 - Add unit tests for ETL and anomaly detection
-- Add anomaly table to UI
-- Add dropdown to select different indicators (like UNRATE, FEDFUNDS)
 - Use cron or GitHub Actions to auto-refresh data
-- deploy
 
 ## License
 
