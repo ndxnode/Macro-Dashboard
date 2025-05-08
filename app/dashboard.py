@@ -9,7 +9,9 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from detect import get_anomalies_for_indicator
 
-DB_PATH = 'data/macro_data.db'
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+DB_PATH = os.path.join(PROJECT_ROOT, 'data', 'macro_data.db')
+
 app = dash.Dash(__name__)
 server = app.server
 
