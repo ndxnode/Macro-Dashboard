@@ -111,6 +111,32 @@ def build_grouped_options(indicators, header_prefix='-- ', header_suffix=' --'):
     return options
 
 
+def build_flat_options(indicators):
+    """Turn a flat iterable of indicator NAMES into a FLAT, ungrouped options list.
+
+    This is the toggle's "flat" counterpart to :func:`build_grouped_options`:
+    it collapses the category sections back to a single, plain alphabetical list,
+    so a ``dcc.Dropdown(options=...)`` shows every indicator with NO disabled
+    ``__cat__`` header rows. Each entry is a plain selectable
+    ``{'label': name, 'value': name}``.
+
+    Returns ``[{'label': name, 'value': name} for name in sorted(set(indicators))]``
+    -- alphabetical and deduplicated. Because it uses ``sorted(set(indicators))``
+    exactly as the grouped path dedups + sorts its members, the flat and grouped
+    builders expose the IDENTICAL set of selectable values on the same input. That
+    means a dropdown's current ``value`` stays valid when the user flips the
+    "group by category" toggle (the value is present in both option sets), so no
+    ``value`` reset is needed.
+
+    An empty or ``None`` `indicators` returns ``[]`` (mirrors
+    :func:`build_grouped_options`' ``if not indicators`` guard). Pure stdlib --
+    no pandas / numpy / plotly / sqlite / dash at module top.
+    """
+    if not indicators:
+        return []
+    return [{'label': name, 'value': name} for name in sorted(set(indicators))]
+
+
 def first_real_value(options, default=None, exclude=None):
     """Return the first SELECTABLE value in a Dash options list, else `default`.
 

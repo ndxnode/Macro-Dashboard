@@ -10,7 +10,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from detect import get_anomalies_for_indicator
 from compare import build_comparison
-from categories import build_grouped_options, first_real_value
+from categories import build_grouped_options, build_flat_options, first_real_value
 from export import clip_to_last_years, preset_years, make_download_callback
 import alerts  # pure, scipy-free -> importing it keeps `import app.dashboard` OK offline
 
@@ -76,14 +76,22 @@ def serve_layout():
     return html.Div([
         html.H1('FRED Macro Dashboard'),
         
-        # YOUR TURN: add a SECOND control (a dcc.Checklist / toggle, e.g.
-        # id='group-toggle') that collapses this grouped view back to a flat
-        # alphabetical list. When toggled "flat", the call site would feed the
-        # dropdown ``[{'label': i, 'value': i} for i in available_indicators]``
-        # (or a future ``build_grouped_options(available_indicators,
-        # grouped=False)`` path) instead of the grouped options below, via a
-        # callback that swaps the dropdown's `options`. Comment only -- do not
-        # implement; the grouped wiring below is the one-increment change.
+        # "Group by category" toggle: ticked (default) shows the grouped view
+        # with disabled __cat__ headers; unticked collapses the dropdown to a
+        # plain alphabetical list via build_flat_options. The set_indicator_options
+        # callback below swaps indicator-dropdown.options between the two. Default
+        # value=['grouped'] => ON => the initial render is byte-identical to the
+        # static grouped options on indicator-dropdown. Flat and grouped expose the
+        # SAME selectable value set, so the dropdown's value never strands.
+        dcc.Checklist(
+            id='group-toggle',
+            options=[{'label': ' Group by category', 'value': 'grouped'}],
+            value=['grouped']
+        ),
+        # YOUR TURN: persist the toggle across page reloads -- mirror its value
+        # into a dcc.Store (or a URL ?grouped= query param via dcc.Location) so an
+        # unticked "flat" preference survives a refresh. Comment only -- not
+        # required for this increment.
         dcc.Dropdown(
             id='indicator-dropdown',
             options=build_grouped_options(available_indicators),
@@ -218,6 +226,27 @@ def serve_layout():
     ])
 
 app.layout = serve_layout # Assign the layout function
+
+
+# Swap the indicator dropdown's options between the grouped (with disabled
+# __cat__ headers) and the flat alphabetical view as the user toggles
+# "Group by category". This is the ONLY callback writing
+# indicator-dropdown.options (the static options= in serve_layout is the
+# initial render; the two value-reading callbacks below never touch .options),
+# so it has a unique Output -- no Dash DuplicateCallback. Default toggle ON =>
+# grouped, re-affirming the static initial render byte-for-byte. We deliberately
+# do NOT add a second Output on indicator-dropdown.value: flat and grouped expose
+# the SAME selectable value set, so the current value stays present after the
+# swap and clearable=False keeps it selected.
+@app.callback(
+    Output('indicator-dropdown', 'options'),
+    Input('group-toggle', 'value')
+)
+def set_indicator_options(group_value):
+    if group_value and 'grouped' in group_value:
+        return build_grouped_options(available_indicators)
+    return build_flat_options(available_indicators)
+
 
 # Callback to update the graph
 @app.callback(

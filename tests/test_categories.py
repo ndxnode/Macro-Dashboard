@@ -229,6 +229,56 @@ def test_first_real_value_exclude_none_is_unchanged_behavior():
         categories.first_real_value(options)
 
 
+# ---- (10) build_flat_options: plain alphabetical list, no __cat__ headers ----
+
+def test_build_flat_options_shape_no_headers():
+    options = categories.build_flat_options(SYNTH_THREE_CATS)
+    # A flat list of plain {'label','value'} dicts with label == value.
+    assert isinstance(options, list)
+    assert all(isinstance(o, dict) for o in options)
+    for o in options:
+        assert o['label'] == o['value']
+        assert 'disabled' not in o
+        assert not str(o['value']).startswith('__cat__')
+    # The whole point: NO disabled category-header rows.
+    assert _headers(options) == []
+
+
+def test_build_flat_options_selectable_set_equals_input():
+    options = categories.build_flat_options(SYNTH_THREE_CATS)
+    assert {o['value'] for o in options} == set(SYNTH_THREE_CATS)
+
+
+def test_build_flat_options_is_alphabetical():
+    options = categories.build_flat_options(SYNTH_THREE_CATS)
+    assert [o['value'] for o in options] == sorted(set(SYNTH_THREE_CATS))
+
+
+def test_build_flat_options_deduplicates():
+    options = categories.build_flat_options(['GDP', 'GDP', 'CPI'])
+    values = [o['value'] for o in options]
+    assert values == ['CPI', 'GDP']
+    assert values.count('GDP') == 1
+
+
+def test_build_flat_options_empty_and_none_return_empty_list():
+    assert categories.build_flat_options([]) == []
+    assert categories.build_flat_options(None) == []
+
+
+def test_build_flat_and_grouped_expose_same_selectable_set_and_first_value():
+    # Parity: the flat and grouped builders surface the SAME selectable value set
+    # on the same input, so a dropdown value stays valid when the toggle flips.
+    flat = categories.build_flat_options(SYNTH_THREE_CATS)
+    grouped = categories.build_grouped_options(SYNTH_THREE_CATS)
+    assert {o['value'] for o in flat} == {o['value'] for o in _selectable(grouped)}
+    # first_real_value on the flat options is the FIRST ALPHABETICAL indicator
+    # (flat has no headers to skip) and is never a '__cat__' header.
+    first = categories.first_real_value(flat)
+    assert first == sorted(set(SYNTH_THREE_CATS))[0]
+    assert not str(first).startswith('__cat__')
+
+
 # ---- (extra) the YOUR TURN UI hook is importable but unimplemented -----------
 
 def test_attach_grouped_dropdowns_is_a_your_turn_stub():
