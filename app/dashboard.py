@@ -3,6 +3,7 @@ from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output, State
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 import pandas as pd
 import sqlite3
 import sys
@@ -391,24 +392,44 @@ def build_overlay_figure(comparison, name_a, name_b):
 
     fig = go.Figure()
 
+    # Resolve the two trace colours ONCE from the default template's colorway.
+    # Plotly assigns colours lazily at render time, so offline ``fig.data[1].
+    # line.color`` is None unless we set it explicitly -- which we do below so
+    # the right axis can be coloured to match series B's line (assertable offline).
+    colorway = pio.templates[pio.templates.default].layout.colorway or (
+        '#636efa', '#EF553B',
+    )
+    color_a = colorway[0]
+    color_b = colorway[1 % len(colorway)]  # guard a 1-colour colorway
+    # YOUR TURN: let the caller pass an explicit colours=(a, b) override (e.g. a
+    # colour-blind-safe palette) instead of always taking the template colorway
+    # -- comment only for now; the default stays the template colorway.
+
     # Series A on the primary (left) y-axis; series B on a secondary (right)
     # y-axis so two very different scales can share one chart. The data is
     # already aligned and (optionally) %-change transformed by build_comparison.
-    fig.add_scatter(x=overlay.index, y=overlay[name_a], mode='lines', name=name_a)
+    # Both line colours are set EXPLICITLY so the axes can match them.
     fig.add_scatter(
-        x=overlay.index, y=overlay[name_b], mode='lines', name=name_b, yaxis='y2'
+        x=overlay.index, y=overlay[name_a], mode='lines', name=name_a,
+        line=dict(color=color_a),
+    )
+    fig.add_scatter(
+        x=overlay.index, y=overlay[name_b], mode='lines', name=name_b,
+        yaxis='y2', line=dict(color=color_b),
     )
 
     suffix = ' (% change)' if comparison.get('pct_change') else ''
+    # Per-axis titles + colour the right axis (title font + ticks) to match
+    # series B's line, so a reader knows which series each axis belongs to.
     fig.update_layout(
         title=f'{name_a} vs {name_b}{suffix}',
-        yaxis2=dict(overlaying='y', side='right'),
+        yaxis=dict(title=dict(text=name_a)),
+        yaxis2=dict(
+            overlaying='y', side='right',
+            title=dict(text=name_b, font=dict(color=color_b)),
+            tickfont=dict(color=color_b),
+        ),
     )
-    # YOUR TURN: tell the two axes apart at a glance. Give each y-axis its own
-    # title (yaxis_title=name_a) and colour the right axis to match series B's
-    # line -- set yaxis2's title/tickfont colour to the second trace's colour
-    # (e.g. fig.data[1].line.color) so a reader knows which series each axis
-    # belongs to. Comment only for now; ~3-4 lines when you fill it in.
     return fig
 
 

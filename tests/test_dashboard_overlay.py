@@ -66,3 +66,39 @@ def test_empty_overlay_guard_empty_frame_returns_zero_traces():
         {'overlay': empty, 'pct_change': False}, 'A', 'B'
     )
     assert len(fig.data) == 0
+
+
+def test_yaxis_has_series_a_title():
+    fig = dashboard.build_overlay_figure(_make_comparison(), 'A', 'B')
+    assert fig.layout.yaxis.title.text == 'A'
+
+
+def test_yaxis2_has_series_b_title():
+    fig = dashboard.build_overlay_figure(_make_comparison(), 'A', 'B')
+    assert fig.layout.yaxis2.title.text == 'B'
+
+
+def test_series_a_line_has_explicit_color():
+    fig = dashboard.build_overlay_figure(_make_comparison(), 'A', 'B')
+    # Colour set explicitly so it round-trips offline (lazy resolution otherwise).
+    assert fig.data[0].line.color is not None
+    assert isinstance(fig.data[0].line.color, str)
+
+
+def test_series_b_line_has_explicit_color():
+    fig = dashboard.build_overlay_figure(_make_comparison(), 'A', 'B')
+    assert fig.data[1].line.color is not None
+    assert isinstance(fig.data[1].line.color, str)
+
+
+def test_right_axis_colour_matches_series_b_line():
+    # The load-bearing cross-equality: series B's line colour == the right
+    # axis title font colour == the right axis tickfont colour, so a reader can
+    # map the right axis to series B. Assert EQUALITY (not a hex literal) so it
+    # survives a template-colorway change.
+    fig = dashboard.build_overlay_figure(_make_comparison(), 'A', 'B')
+    assert (
+        fig.data[1].line.color
+        == fig.layout.yaxis2.title.font.color
+        == fig.layout.yaxis2.tickfont.color
+    )
