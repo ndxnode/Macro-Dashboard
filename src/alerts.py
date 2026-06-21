@@ -198,7 +198,14 @@ def _describe_verb(rule):
     if rule.direction == 'above':
         return f'anomalies above z={thr}'
     if rule.direction == 'below':
-        return f'anomalies below z=-{thr}'
+        # threshold is interpreted by MAGNITUDE: the anomaly band is +/-|thr| and
+        # 'below' fires under the negative bound, so we render the negated magnitude
+        # (-abs) rather than gluing a literal '-' onto an already-signed number --
+        # this avoids "z=--3" when a degenerate/programmatic rule passes threshold<0.
+        # YOUR TURN: a future caller wanting the user's RAW signed threshold verbatim
+        # (e.g. an explicit asymmetric band) has a documented seam here -- the current
+        # contract is "below the negative |z| bound", not "below the raw signed z".
+        return f'anomalies below z={-abs(rule.threshold):g}'
     return f'anomalies |z|>{thr}'  # 'both'
 
 

@@ -285,6 +285,19 @@ def test_summarize_alert_both_direction_verbs():
     assert 'z=' in an_summary  # anomaly summaries carry the real z
 
 
+# --- (j2) _describe_verb: anomaly/below negative threshold, no double-minus ---
+
+def test_describe_verb_below_negative_threshold_no_double_minus():
+    # threshold is taken by MAGNITUDE: the 'below' bound is the negative |z|, so a
+    # negative threshold must NOT render "z=--3". Both -3 and 3 collapse to "z=-3".
+    neg = alerts.AlertRule(indicator='X', kind='anomaly', direction='below',
+                           threshold=-3)
+    pos = alerts.AlertRule(indicator='X', kind='anomaly', direction='below',
+                           threshold=3)
+    assert alerts._describe_verb(neg) == 'anomalies below z=-3'   # was 'z=--3'
+    assert alerts._describe_verb(pos) == 'anomalies below z=-3'   # byte-identical
+
+
 # --- (k) build_alerts_payload: empty/None rules -> [] ------------------------
 
 def test_build_alerts_payload_empty_or_none_rules_is_empty_list():
