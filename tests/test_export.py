@@ -117,6 +117,20 @@ def test_clip_non_datetime_index_returned_as_is():
     assert list(out['series_a']) == [1.0, 2.0, 3.0]
 
 
+def test_clip_fractional_float_years_does_not_raise():
+    # pd.DateOffset(years=1.5) raises a dateutil ValueError ("Non-integer years
+    # ... not currently supported"). The helper must degrade gracefully to a
+    # whole-year window (int(1.5) -> 1) instead of crashing, like the integer
+    # preset path -- 10 years of monthly data clipped to ~1Y -> 13 rows.
+    frame = _make_overlay(n=120)
+    clipped = export.clip_to_last_years(frame, 1.5)
+    assert len(clipped) == 13
+    # And an integer-valued float matches the int preset exactly.
+    assert len(export.clip_to_last_years(frame, 1.0)) == len(
+        export.clip_to_last_years(frame, 1)
+    )
+
+
 # ---- (d) empty / None frame: no raises --------------------------------------
 
 def test_empty_and_none_frames_do_not_raise():

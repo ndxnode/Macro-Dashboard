@@ -97,7 +97,12 @@ def clip_to_last_years(frame, years):
         return frame.copy() if hasattr(frame, 'copy') else frame
     if frame.empty or not isinstance(frame.index, pd.DatetimeIndex):
         return frame
-    cutoff = frame.index.max() - pd.DateOffset(years=years)
+    # pd.DateOffset(years=...) rejects non-integer years with an opaque dateutil
+    # ValueError, so coerce to a whole-year window (truncating toward zero). The
+    # 1Y/5Y/10Y presets pass ints already; this only hardens a fractional float
+    # so the helper degrades gracefully instead of crashing, matching the empty/
+    # non-datetime "return as-is, never raise" discipline above.
+    cutoff = frame.index.max() - pd.DateOffset(years=int(years))
     return frame[frame.index >= cutoff]
 
 
