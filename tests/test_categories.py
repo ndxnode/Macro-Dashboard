@@ -279,6 +279,59 @@ def test_build_flat_and_grouped_expose_same_selectable_set_and_first_value():
     assert not str(first).startswith('__cat__')
 
 
+# ---- normalize_toggle_value: coerce any persisted Store value to a clean -----
+# ---- Checklist value ([] or exactly ['grouped']) -----------------------------
+
+def test_normalize_canonical_and_bare_string():
+    # A bare string ('grouped') -- the URL ?grouped= form -- and the already
+    # canonical list both normalize to exactly ['grouped'].
+    assert categories.normalize_toggle_value('grouped') == ['grouped']
+    assert categories.normalize_toggle_value(['grouped']) == ['grouped']
+
+
+def test_normalize_container_with_grouped_member():
+    # Any list/tuple/set CONTAINING 'grouped' collapses to exactly ['grouped'].
+    assert categories.normalize_toggle_value(['grouped', 'x']) == ['grouped']
+    assert categories.normalize_toggle_value(('grouped',)) == ['grouped']
+    assert categories.normalize_toggle_value({'grouped'}) == ['grouped']
+
+
+def test_normalize_flat_and_unknown_inputs():
+    # None / '' / [] / 'flat' / 0 / unknown / a list WITHOUT 'grouped' -> [].
+    for stored in (None, '', [], 'flat', 0, 'other', ['flat', 'x'], ()):
+        assert categories.normalize_toggle_value(stored) == [], stored
+
+
+def test_normalize_is_idempotent():
+    for stored in ('grouped', ['grouped', 'x'], None, 'flat', [], 0):
+        once = categories.normalize_toggle_value(stored)
+        assert categories.normalize_toggle_value(once) == once, stored
+
+
+def test_normalize_returns_a_fresh_list():
+    # Mutating the returned list must not affect a later call (fresh each time).
+    first = categories.normalize_toggle_value('grouped')
+    first.append('mutated')
+    assert categories.normalize_toggle_value('grouped') == ['grouped']
+    flat = categories.normalize_toggle_value(None)
+    flat.append('mutated')
+    assert categories.normalize_toggle_value(None) == []
+
+
+def test_normalize_output_is_always_empty_or_grouped():
+    # Output is ALWAYS either [] or exactly ['grouped'], whatever the input.
+    for stored in ('grouped', ['grouped'], ['grouped', 'x'], None, '', [],
+                   'flat', 0, 'other', {'a': 1}, ['x', 'y']):
+        result = categories.normalize_toggle_value(stored)
+        assert result in ([], ['grouped']), (stored, result)
+
+
+def test_normalize_never_raises_on_weird_input():
+    # Total: a non-iterable / weird input never raises -- falls through to [].
+    for stored in (0, 3.5, object(), True):
+        assert categories.normalize_toggle_value(stored) == [], stored
+
+
 # ---- (extra) the YOUR TURN UI hook is importable but unimplemented -----------
 
 def test_attach_grouped_dropdowns_is_a_your_turn_stub():

@@ -11,7 +11,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from detect import get_anomalies_for_indicator
 from compare import build_comparison
-from categories import build_grouped_options, build_flat_options, first_real_value
+from categories import build_grouped_options, build_flat_options, first_real_value, normalize_toggle_value
 from export import clip_to_last_years, preset_years, make_download_callback
 import alerts  # pure, scipy-free -> importing it keeps `import app.dashboard` OK offline
 
@@ -89,10 +89,20 @@ def serve_layout():
             options=[{'label': ' Group by category', 'value': 'grouped'}],
             value=['grouped']
         ),
-        # YOUR TURN: persist the toggle across page reloads -- mirror its value
-        # into a dcc.Store (or a URL ?grouped= query param via dcc.Location) so an
-        # unticked "flat" preference survives a refresh. Comment only -- not
-        # required for this increment.
+        # Persist the toggle across page reloads. storage_type='local' is what
+        # makes the BROWSER keep this across refreshes (the inherently browser-side
+        # part -- not asserted offline; the tested core is
+        # categories.normalize_toggle_value, which sanitizes whatever the Store
+        # round-trips back). data=['grouped'] seeds the default-ON so a FIRST visit
+        # with no persisted value still loads grouped (normalize itself maps
+        # None -> [], so the Store -- not normalize -- owns the default). The two
+        # callbacks below (sync_group_toggle / persist_group_toggle) form a
+        # Store<->Checklist round-trip with DISTINCT outputs.
+        dcc.Store(id='group-toggle-store', storage_type='local', data=['grouped']),
+        # YOUR TURN: a URL ?grouped= query-param variant (via dcc.Location) is an
+        # ALTERNATIVE to this storage_type='local' Store -- normalize_toggle_value
+        # already accepts a parsed query string, so swapping the source needs no
+        # helper change. Comment only -- not required for this increment.
         dcc.Dropdown(
             id='indicator-dropdown',
             options=build_grouped_options(available_indicators),
@@ -247,6 +257,35 @@ def set_indicator_options(group_value):
     if group_value and 'grouped' in group_value:
         return build_grouped_options(available_indicators)
     return build_flat_options(available_indicators)
+
+
+# --- Group-toggle persistence (Store<->Checklist round-trip) -----------------
+# group-toggle.value is written ONLY here (it is set statically in serve_layout;
+# the two indicator-dropdown callbacks READ it as Input) -> unique Output, no
+# DuplicateCallbackOutput. We trigger off the Store's modified_timestamp (with the
+# data on State) rather than Input on .data so the load-time hydrate fires once
+# without an extra initial-call edge. No prevent_initial_call here -- we WANT the
+# load-time hydrate so a persisted "flat" preference is restored on refresh.
+@app.callback(
+    Output('group-toggle', 'value'),
+    Input('group-toggle-store', 'modified_timestamp'),
+    State('group-toggle-store', 'data')
+)
+def sync_group_toggle(_ts, stored):
+    return normalize_toggle_value(stored)
+
+
+# group-toggle-store.data is written ONLY here (its data= in serve_layout is the
+# initial seed) -> unique Output. prevent_initial_call=True is the loop-breaker:
+# sync_group_toggle hydrates the toggle on load WITHOUT this immediately writing
+# back. A user toggle then PERSISTS its normalized value into the Store.
+@app.callback(
+    Output('group-toggle-store', 'data'),
+    Input('group-toggle', 'value'),
+    prevent_initial_call=True
+)
+def persist_group_toggle(value):
+    return normalize_toggle_value(value)
 
 
 # Callback to update the graph

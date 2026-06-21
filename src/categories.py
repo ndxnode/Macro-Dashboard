@@ -174,6 +174,60 @@ def first_real_value(options, default=None, exclude=None):
     return default
 
 
+def normalize_toggle_value(stored):
+    """Coerce ANY persisted dcc.Store value into a canonical Checklist value list.
+
+    The "Group by category" toggle is a ``dcc.Checklist(id='group-toggle')`` whose
+    only valid member is the literal string ``'grouped'``, so its value is always
+    either ``[]`` (flat) or exactly ``['grouped']`` (grouped). When that value is
+    persisted in a ``dcc.Store(storage_type='local')`` it round-trips through the
+    browser and can come back in a degraded shape -- a bare string ``'grouped'``,
+    an already-canonical ``['grouped']``, a list that merely CONTAINS ``'grouped'``
+    (``['grouped', 'x']``), ``None`` on a first visit, ``''`` / ``[]`` / ``'flat'``
+    / ``0`` / arbitrary garbage. This helper sanitizes any of those back to the
+    clean Checklist value:
+
+      * ``'grouped'``                      -> ``['grouped']`` (a bare string)
+      * ``['grouped']``                    -> ``['grouped']`` (already canonical)
+      * any list/tuple/set CONTAINING
+        ``'grouped'`` (e.g. ``['grouped','x']``) -> ``['grouped']``
+      * ``None`` / ``''`` / ``[]`` / ``'flat'`` / ``0`` / unknown / any list
+        WITHOUT ``'grouped'``              -> ``[]`` (flat)
+
+    DESIGN: the default-ON behaviour is owned by the dcc.Store's INITIAL
+    ``data=['grouped']`` (so a first visit with no persisted value still loads
+    grouped). This function maps ``None -> []`` so it is a faithful COERCION, not
+    a default-injector -- the Store seeds the default; normalize only sanitizes.
+
+    CONTRACT (all guaranteed):
+      * total -- NEVER raises, even on unhashable / non-iterable / weird input
+        (a non-iterable like ``0`` or a bare object falls through to ``[]``).
+      * idempotent -- ``normalize(normalize(x)) == normalize(x)``.
+      * returns a FRESH list each call (mutating the result never affects a later
+        call, since the two possible outputs are built anew each time).
+      * output is ALWAYS either ``[]`` or exactly ``['grouped']``.
+
+    It also accepts a parsed URL ``?grouped=`` query string as the source (a bare
+    string like ``'grouped'``), so swapping the dcc.Store for a dcc.Location URL
+    query param needs no change here. Pure stdlib -- no pandas / plotly / dash /
+    sqlite.
+    """
+    # A bare canonical string ('grouped') -- the URL ?grouped= form too.
+    if stored == 'grouped':
+        return ['grouped']
+    # Any container holding 'grouped'. Membership-test defensively: a non-iterable
+    # (0, None, an object) raises TypeError on `in`, which we swallow -> flat [].
+    try:
+        if 'grouped' in stored:
+            return ['grouped']
+    except TypeError:
+        pass
+    # Everything else -- None / '' / [] / 'flat' / 0 / unknown / a list without
+    # 'grouped' -- is flat. (A plain string like 'flat' that does NOT contain the
+    # 'grouped' substring lands here; 'grouped' itself was handled above.)
+    return []
+
+
 def attach_grouped_dropdowns(app, available_indicators):
     """Documented wiring boundary -- the rewire now lives in app/dashboard.py.
 
