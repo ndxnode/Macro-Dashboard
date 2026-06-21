@@ -1,0 +1,246 @@
+# categories.py
+"""Category grouping for the macro indicators, as a PURE stdlib module.
+
+This is the leanest of the helper modules: NO pandas / numpy / sqlite / network /
+scipy / plotly at module top (it does not even need pandas), the same import
+discipline as compare.py / detect.py / alerts.py / export.py. It maps each
+indicator NAME (the keys of etl.py's ``INDICATORS`` dict -- e.g. 'CPI',
+'Unemployment Rate' -- NOT the FRED series IDs) to one of four macro categories,
+and turns a flat list of indicator names into a FLAT options list suitable for a
+Dash ``dcc.Dropdown``.
+
+WHY a flat list with disabled header rows: Dash ``dcc.Dropdown`` does not support
+HTML optgroups, so the grouped look is achieved by inserting a DISABLED header
+row (a ``{'label': '-- Growth --', 'value': '__cat__Growth', 'disabled': True}``
+entry) before each category's members. The ``__cat__`` value sentinel plus
+``disabled: True`` means a header can never be selected. This is the only shape
+that is both unit-testable AND directly droppable into the existing
+``options=[...]`` slots in app/dashboard.py.
+
+etl.py is deliberately NOT imported here: it does ``from fredapi import Fred`` and
+constructs a network client at module top, so importing it would drag a network
+dependency (and an absent FRED_API_KEY) into this pure module and into the tests.
+The indicator names are therefore the responsibility of the caller (the Dash app
+already has them in ``available_indicators``); this module only needs the
+name->category map, which we duplicate below.
+"""
+
+# Each etl.py indicator NAME -> its macro category. (Names mirror etl.py's
+# INDICATORS dict keys, not the FRED series IDs.) 'Consumer Sentiment' is treated
+# as a growth/confidence proxy -> 'Growth'.
+INDICATOR_CATEGORY = {
+    'GDP': 'Growth',
+    'Consumer Sentiment': 'Growth',
+    'CPI': 'Inflation',
+    'PCE Price Index': 'Inflation',
+    'Unemployment Rate': 'Labor',
+    'Fed Funds Rate': 'Rates',
+}
+
+# Deterministic display order for the category sections. Any category NOT in this
+# list (e.g. the fallback bucket below, or a future addition) is emitted AFTER
+# these four in sorted order.
+CATEGORY_ORDER = ['Growth', 'Inflation', 'Labor', 'Rates']
+
+# Fallback bucket name for an unknown / newly-added indicator, so it degrades to a
+# visible 'Other' section instead of vanishing.
+UNCATEGORIZED = 'Other'
+
+
+def categorize(indicator):
+    """Return the category for `indicator`, or ``UNCATEGORIZED`` if unknown.
+
+    Keeps the name->category lookup in ONE place so an unknown / newly-added FRED
+    series degrades to 'Other' instead of silently dropping out of the dropdown.
+    """
+    return INDICATOR_CATEGORY.get(indicator, UNCATEGORIZED)
+
+
+def build_grouped_options(indicators, header_prefix='-- ', header_suffix=' --'):
+    """Turn a flat iterable of indicator NAMES into a FLAT Dash options list.
+
+    Returns a ``list[dict]`` ready to drop into a ``dcc.Dropdown(options=...)``
+    where each category contributes one DISABLED HEADER row followed by its
+    members. The shape per entry:
+
+      * header:  ``{'label': f'{header_prefix}{cat}{header_suffix}',
+                    'value': f'__cat__{cat}', 'disabled': True}``
+      * member:  ``{'label': name, 'value': name}``
+
+    Algorithm:
+      1. Group the input names by :func:`categorize`.
+      2. Emit sections in ``CATEGORY_ORDER`` first, then any extra categories
+         (e.g. 'Other') in sorted order AFTER the canonical four, so the output
+         order is fully deterministic.
+      3. SKIP a category with no members (no empty headers).
+      4. Members within a category are sorted alphabetically (deterministic; the
+         DB feed is already sorted, but we do not rely on input order).
+      5. Input names are deduplicated, so a repeated name never appears twice.
+
+    An empty or ``None`` `indicators` returns ``[]`` (no headers, no crash).
+    """
+    if not indicators:
+        return []
+
+    # Group deduplicated names by category. A set drops duplicates; we sort the
+    # members per category below, so first-seen order is irrelevant.
+    grouped = {}
+    for name in set(indicators):
+        grouped.setdefault(categorize(name), []).append(name)
+
+    if not grouped:
+        return []
+
+    # Canonical categories first (in CATEGORY_ORDER), then any extras (e.g.
+    # 'Other') in sorted order, for a fully deterministic section order.
+    extras = sorted(cat for cat in grouped if cat not in CATEGORY_ORDER)
+    ordered_categories = [c for c in CATEGORY_ORDER if c in grouped] + extras
+
+    options = []
+    for category in ordered_categories:
+        members = grouped[category]
+        if not members:  # belt-and-suspenders: never emit an empty header
+            continue
+        options.append({
+            'label': f'{header_prefix}{category}{header_suffix}',
+            'value': f'__cat__{category}',
+            'disabled': True,
+        })
+        for name in sorted(members):
+            options.append({'label': name, 'value': name})
+    return options
+
+
+def build_flat_options(indicators):
+    """Turn a flat iterable of indicator NAMES into a FLAT, ungrouped options list.
+
+    This is the toggle's "flat" counterpart to :func:`build_grouped_options`:
+    it collapses the category sections back to a single, plain alphabetical list,
+    so a ``dcc.Dropdown(options=...)`` shows every indicator with NO disabled
+    ``__cat__`` header rows. Each entry is a plain selectable
+    ``{'label': name, 'value': name}``.
+
+    Returns ``[{'label': name, 'value': name} for name in sorted(set(indicators))]``
+    -- alphabetical and deduplicated. Because it uses ``sorted(set(indicators))``
+    exactly as the grouped path dedups + sorts its members, the flat and grouped
+    builders expose the IDENTICAL set of selectable values on the same input. That
+    means a dropdown's current ``value`` stays valid when the user flips the
+    "group by category" toggle (the value is present in both option sets), so no
+    ``value`` reset is needed.
+
+    An empty or ``None`` `indicators` returns ``[]`` (mirrors
+    :func:`build_grouped_options`' ``if not indicators`` guard). Pure stdlib --
+    no pandas / numpy / plotly / sqlite / dash at module top.
+    """
+    if not indicators:
+        return []
+    return [{'label': name, 'value': name} for name in sorted(set(indicators))]
+
+
+def first_real_value(options, default=None, exclude=None):
+    """Return the first SELECTABLE value in a Dash options list, else `default`.
+
+    Given a :func:`build_grouped_options`-style ``list[dict]``, return the
+    ``value`` of the FIRST entry that is a real, selectable indicator -- i.e. the
+    first dict that is NOT a disabled ``__cat__`` category header. Concretely, an
+    entry is skipped when it is disabled OR its ``value`` starts with the
+    ``'__cat__'`` sentinel; the first entry that survives both checks has its
+    ``value`` returned.
+
+    This is the single guaranteed-safe way to choose a dropdown's ``value=``
+    default so it can NEVER be a category header (selecting a disabled
+    ``__cat__`` row would be a no-op / invalid default). An empty or ``None``
+    `options` (or one that is ALL headers) returns `default`.
+
+    `exclude` lets a SECOND dropdown pick a default DISTINCT from the first: when
+    provided (not ``None``), an otherwise-selectable entry whose ``value`` equals
+    `exclude` is also skipped, so a compare pair never defaults both sides to the
+    same indicator (a degenerate self-comparison). If the only selectable value is
+    the excluded one (e.g. a single-indicator feed), `default` is returned.
+
+    Pure stdlib -- no pandas / plotly / sqlite.
+    """
+    if not options:
+        return default
+    for o in options:
+        if o.get('disabled'):
+            continue
+        value = o.get('value')
+        if str(value).startswith('__cat__'):
+            continue
+        if exclude is not None and value == exclude:
+            continue
+        return value
+    return default
+
+
+def normalize_toggle_value(stored):
+    """Coerce ANY persisted dcc.Store value into a canonical Checklist value list.
+
+    The "Group by category" toggle is a ``dcc.Checklist(id='group-toggle')`` whose
+    only valid member is the literal string ``'grouped'``, so its value is always
+    either ``[]`` (flat) or exactly ``['grouped']`` (grouped). When that value is
+    persisted in a ``dcc.Store(storage_type='local')`` it round-trips through the
+    browser and can come back in a degraded shape -- a bare string ``'grouped'``,
+    an already-canonical ``['grouped']``, a list that merely CONTAINS ``'grouped'``
+    (``['grouped', 'x']``), ``None`` on a first visit, ``''`` / ``[]`` / ``'flat'``
+    / ``0`` / arbitrary garbage. This helper sanitizes any of those back to the
+    clean Checklist value:
+
+      * ``'grouped'``                      -> ``['grouped']`` (a bare string)
+      * ``['grouped']``                    -> ``['grouped']`` (already canonical)
+      * any list/tuple/set CONTAINING
+        ``'grouped'`` (e.g. ``['grouped','x']``) -> ``['grouped']``
+      * ``None`` / ``''`` / ``[]`` / ``'flat'`` / ``0`` / unknown / any list
+        WITHOUT ``'grouped'``              -> ``[]`` (flat)
+
+    DESIGN: the default-ON behaviour is owned by the dcc.Store's INITIAL
+    ``data=['grouped']`` (so a first visit with no persisted value still loads
+    grouped). This function maps ``None -> []`` so it is a faithful COERCION, not
+    a default-injector -- the Store seeds the default; normalize only sanitizes.
+
+    CONTRACT (all guaranteed):
+      * total -- NEVER raises, even on unhashable / non-iterable / weird input
+        (a non-iterable like ``0`` or a bare object falls through to ``[]``).
+      * idempotent -- ``normalize(normalize(x)) == normalize(x)``.
+      * returns a FRESH list each call (mutating the result never affects a later
+        call, since the two possible outputs are built anew each time).
+      * output is ALWAYS either ``[]`` or exactly ``['grouped']``.
+
+    It also accepts a parsed URL ``?grouped=`` query string as the source (a bare
+    string like ``'grouped'``), so swapping the dcc.Store for a dcc.Location URL
+    query param needs no change here. Pure stdlib -- no pandas / plotly / dash /
+    sqlite.
+    """
+    # A bare canonical string ('grouped') -- the URL ?grouped= form too.
+    if stored == 'grouped':
+        return ['grouped']
+    # Any container holding 'grouped'. Membership-test defensively: a non-iterable
+    # (0, None, an object) raises TypeError on `in`, which we swallow -> flat [].
+    try:
+        if 'grouped' in stored:
+            return ['grouped']
+    except TypeError:
+        pass
+    # Everything else -- None / '' / [] / 'flat' / 0 / unknown / a list without
+    # 'grouped' -- is flat. (A plain string like 'flat' that does NOT contain the
+    # 'grouped' substring lands here; 'grouped' itself was handled above.)
+    return []
+
+
+def attach_grouped_dropdowns(app, available_indicators):
+    """Documented wiring boundary -- the rewire now lives in app/dashboard.py.
+
+    The dropdown rewire this stub used to advertise is DONE: app/dashboard.py now
+    feeds each of its three indicator dropdowns
+    (``indicator-dropdown`` / ``compare-dropdown-a`` / ``compare-dropdown-b``)
+    ``options=build_grouped_options(available_indicators)``, keeping each
+    ``value=`` default a REAL indicator name (never a '__cat__' header). The
+    :func:`first_real_value` helper above is the tested safety net that guarantees
+    a chosen default is selectable.
+
+    This function stays an importable, unimplemented hook (mirroring
+    export.make_download_callback) so nothing here imports Dash; there is nothing
+    left to wire from this side.
+    """
+    raise NotImplementedError  # wiring done in app/dashboard.py; this stays a no-op hook
