@@ -171,10 +171,73 @@ def evaluate_alert(rule, df):
     return out
 
 
+def _describe_verb(rule):
+    """Human phrase for what a rule fires on, from kind/direction/threshold.
+
+    Deterministic and pure -- depends only on the rule fields. Examples:
+      level/above  -> "above level 5"     (threshold formatted with :g)
+      level/below  -> "below level 5"
+      level/both   -> "off level 5"
+      anomaly/above-> "anomalies above z=3"
+      anomaly/below-> "anomalies below z=-3"
+      anomaly/both -> "anomalies |z|>3"
+    """
+    thr = f'{rule.threshold:g}'
+    if rule.kind == 'level':
+        if rule.direction == 'above':
+            return f'above level {thr}'
+        if rule.direction == 'below':
+            return f'below level {thr}'
+        return f'off level {thr}'  # 'both'
+    # kind == 'anomaly'
+    if rule.direction == 'above':
+        return f'anomalies above z={thr}'
+    if rule.direction == 'below':
+        return f'anomalies below z=-{thr}'
+    return f'anomalies |z|>{thr}'  # 'both'
+
+
 def summarize_alert(rule, fired):
-    """One-line human summary of an evaluate_alert result, e.g.
-    "UNRATE: 3 points above level 5.0 (latest 2024-06-01 = 5.4)".
-    # YOUR TURN: build the f-string from rule.kind/direction/threshold and the
-    # last row of `fired`; return "No alerts." when fired is empty. Keep it pure
-    # (no I/O). A test for this is intentionally NOT included yet."""
-    raise NotImplementedError  # YOUR TURN
+    """One-line human summary of an :func:`evaluate_alert` result.
+
+    ``fired`` is an evaluate_alert frame: columns EXACTLY
+    ``['date','value','z_score']``, sorted date-ASCENDING with a 0..n reset
+    index, so ``fired.iloc[-1]`` is the latest firing point. PURE -- no I/O, no
+    Dash, no sqlite, no network; uses only ``rule`` fields and the rows in hand.
+
+    Empty / None ``fired`` -> the literal ``"No alerts."``. Otherwise returns a
+    deterministic line of the shape::
+
+        "<indicator>: <N> point[s] <verb> (latest <YYYY-MM-DD> = <value>[, z=<z>])"
+
+    where N = ``len(fired)`` (pluralizing "point"/"points"), ``<verb>`` comes
+    from :func:`_describe_verb` (kind + direction + threshold), and the latest
+    date/value come from the last row. For ``kind='anomaly'`` the real latest
+    z (``z=<z>``) is appended; for ``kind='level'`` z_score is NaN so it is
+    omitted. Floats render with ``:g`` (NaN-tolerant) so the format is total and
+    test-assertable. Examples::
+
+        "UNRATE: 3 points above level 5 (latest 2024-06-01 = 5.4)"
+        "CPI: 1 point anomalies above z=3 (latest 2024-06-01 = 30.5, z=4.2)"
+    """
+    if fired is None or len(fired) == 0:
+        return 'No alerts.'
+
+    n = len(fired)
+    noun = 'point' if n == 1 else 'points'
+    verb = _describe_verb(rule)
+
+    last = fired.iloc[-1]
+    # Robust to the datetime64 'date' column (and to a plain string/Timestamp).
+    latest_date = pd.Timestamp(last['date']).strftime('%Y-%m-%d')
+    latest_value = f"{last['value']:g}"  # :g tolerates NaN -> "nan"
+
+    summary = (
+        f"{rule.indicator}: {n} {noun} {verb} "
+        f"(latest {latest_date} = {latest_value}"
+    )
+    # Anomaly summaries carry the real latest z; level summaries have NaN z, omit.
+    if rule.kind == 'anomaly':
+        summary += f", z={last['z_score']:g}"
+    summary += ')'
+    return summary

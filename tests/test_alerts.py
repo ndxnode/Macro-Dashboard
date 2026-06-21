@@ -199,3 +199,87 @@ def test_anomaly_direction_above_catches_positive_spike_below_does_not():
     assert above['z_score'].iloc[0] > 3.0
     # A positive spike is not a 'below' (negative-z) event.
     assert len(below) == 0
+
+
+# --- (g) summarize_alert: empty -> "No alerts." ------------------------------
+
+def test_summarize_alert_empty_is_no_alerts():
+    # A flat series fires no anomalies -> evaluate_alert returns 0 rows.
+    df = _make_df([5.0] * 20)
+    rule = alerts.AlertRule(indicator='X', kind='anomaly', threshold=3.0, window=6)
+    fired = alerts.evaluate_alert(rule, df)
+    assert len(fired) == 0
+    assert alerts.summarize_alert(rule, fired) == 'No alerts.'
+    # None is also treated as "no alerts" (keeps the fn total).
+    assert alerts.summarize_alert(rule, None) == 'No alerts.'
+
+
+# --- (h) summarize_alert: level 'above' summary, exact format locked ---------
+
+def test_summarize_alert_level_above_exact_string():
+    # [1,5,5,9,2,7] threshold 5 -> above fires {9,7}; sorted date-ASC, the LAST
+    # row is the latest firing point (7.0 at 2020-06-01).
+    df = _make_df([1.0, 5.0, 5.0, 9.0, 2.0, 7.0])
+    rule = alerts.AlertRule(indicator='UNRATE', kind='level', threshold=5.0,
+                            direction='above')
+    fired = alerts.evaluate_alert(rule, df)
+    assert len(fired) == 2  # two firing points -> plural "points"
+
+    summary = alerts.summarize_alert(rule, fired)
+    # Lock the EXACT format for at least one case.
+    assert summary == 'UNRATE: 2 points above level 5 (latest 2020-06-01 = 7)'
+    # And spell out the load-bearing parts that the exact string encodes.
+    assert 'UNRATE' in summary                 # indicator name
+    assert '2 points' in summary               # firing count + plural
+    assert 'above level 5' in summary          # verb from kind/direction/threshold
+    assert '2020-06-01' in summary             # latest firing date (the LAST row)
+    assert '= 7' in summary                     # latest value
+    # Level summaries do NOT render z (z_score is NaN for level rules).
+    assert 'z=' not in summary
+
+
+# --- (i) summarize_alert: anomaly summary includes the real z ----------------
+
+def test_summarize_alert_anomaly_includes_real_z_and_singular():
+    rng = np.random.default_rng(0)
+    base = 10.0 + rng.normal(scale=0.1, size=40)
+    spike_idx = 25
+    base[spike_idx] = 30.0  # one positive spike -> exactly one firing point
+    df = _make_df(base)
+    rule = alerts.AlertRule(indicator='CPI', kind='anomaly', threshold=3.0,
+                            window=12, direction='above')
+    fired = alerts.evaluate_alert(rule, df)
+    assert len(fired) == 1  # one firing point -> singular "point"
+
+    summary = alerts.summarize_alert(rule, fired)
+    assert 'CPI' in summary
+    assert '1 point' in summary and '1 points' not in summary  # singular
+    # The latest firing date is the spike's date (the only/last row).
+    assert df['date'].iloc[spike_idx].strftime('%Y-%m-%d') in summary
+    # Anomaly summaries DO render the real latest z (>3.0 here) -- locks that
+    # anomaly summaries include z while level summaries (above) do not.
+    assert 'z=' in summary
+    assert fired['z_score'].iloc[-1] > 3.0
+
+
+# --- (j) summarize_alert: 'both' direction verbs (level vs anomaly) ----------
+
+def test_summarize_alert_both_direction_verbs():
+    # level 'both' -> "off level <thr>"; one finite non-equal point fires.
+    df = _make_df([5.0, 7.0])
+    lvl_rule = alerts.AlertRule(indicator='Y', kind='level', threshold=5.0,
+                               direction='both')
+    lvl_fired = alerts.evaluate_alert(lvl_rule, df)
+    assert 'off level 5' in alerts.summarize_alert(lvl_rule, lvl_fired)
+
+    # anomaly 'both' -> "|z|>" verb; the abs-based outlier fires on the spike.
+    rng = np.random.default_rng(2)
+    base = 10.0 + rng.normal(scale=0.1, size=40)
+    base[25] = 30.0
+    adf = _make_df(base)
+    an_rule = alerts.AlertRule(indicator='Z', kind='anomaly', threshold=3.0,
+                              window=12, direction='both')
+    an_fired = alerts.evaluate_alert(an_rule, adf)
+    an_summary = alerts.summarize_alert(an_rule, an_fired)
+    assert '|z|>3' in an_summary
+    assert 'z=' in an_summary  # anomaly summaries carry the real z
