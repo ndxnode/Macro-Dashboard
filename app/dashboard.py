@@ -10,6 +10,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from detect import get_anomalies_for_indicator
 from compare import build_comparison
+from categories import build_grouped_options, first_real_value
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DB_PATH = os.path.join(PROJECT_ROOT, 'data', 'macro_data.db')
@@ -68,10 +69,18 @@ def serve_layout():
     return html.Div([
         html.H1('FRED Macro Dashboard'),
         
+        # YOUR TURN: add a SECOND control (a dcc.Checklist / toggle, e.g.
+        # id='group-toggle') that collapses this grouped view back to a flat
+        # alphabetical list. When toggled "flat", the call site would feed the
+        # dropdown ``[{'label': i, 'value': i} for i in available_indicators]``
+        # (or a future ``build_grouped_options(available_indicators,
+        # grouped=False)`` path) instead of the grouped options below, via a
+        # callback that swaps the dropdown's `options`. Comment only -- do not
+        # implement; the grouped wiring below is the one-increment change.
         dcc.Dropdown(
             id='indicator-dropdown',
-            options=[{'label': ind, 'value': ind} for ind in available_indicators],
-            value=available_indicators[0] if available_indicators else None,
+            options=build_grouped_options(available_indicators),
+            value=first_real_value(build_grouped_options(available_indicators)),
             clearable=False
         ),
         
@@ -105,14 +114,14 @@ def serve_layout():
         html.Div([
             dcc.Dropdown(
                 id='compare-dropdown-a',
-                options=[{'label': ind, 'value': ind} for ind in available_indicators],
-                value=available_indicators[0] if available_indicators else None,
+                options=build_grouped_options(available_indicators),
+                value=first_real_value(build_grouped_options(available_indicators)),
                 clearable=False,
                 style={'width': '45%', 'display': 'inline-block'}
             ),
             dcc.Dropdown(
                 id='compare-dropdown-b',
-                options=[{'label': ind, 'value': ind} for ind in available_indicators],
+                options=build_grouped_options(available_indicators),
                 value=available_indicators[1] if len(available_indicators) > 1 else None,
                 clearable=False,
                 style={'width': '45%', 'display': 'inline-block', 'marginLeft': '2%'}

@@ -140,6 +140,47 @@ def test_unknown_indicator_lands_in_other_section_last():
     assert other_members == ['Mystery Series']
 
 
+# ---- (8) first_real_value: first selectable value, never a __cat__ header ----
+
+def test_first_real_value_returns_first_selectable_indicator():
+    options = categories.build_grouped_options(SYNTH_THREE_CATS)
+    result = categories.first_real_value(options)
+    # The default must be a REAL indicator from the input -- never a header.
+    assert result in set(SYNTH_THREE_CATS)
+    assert not str(result).startswith('__cat__')
+    # It is exactly the first SELECTABLE entry (options[0] is a disabled header).
+    first_selectable = next(o['value'] for o in options if not o.get('disabled'))
+    assert result == first_selectable
+
+
+def test_first_real_value_empty_and_none_return_default():
+    assert categories.first_real_value([]) is None
+    assert categories.first_real_value(None) is None
+    # A custom default is honored on empty / None input.
+    assert categories.first_real_value([], default='X') == 'X'
+    assert categories.first_real_value(None, default='X') == 'X'
+
+
+def test_first_real_value_is_never_a_cat_header():
+    # The whole point: on real grouped options the default is never a header.
+    options = categories.build_grouped_options(
+        ['GDP', 'CPI', 'Fed Funds Rate', 'Unemployment Rate']
+    )
+    result = categories.first_real_value(options)
+    assert result is not None
+    assert not str(result).startswith('__cat__')
+
+
+def test_first_real_value_all_headers_returns_default():
+    # A synthetic options list that is ALL disabled headers -> default.
+    all_headers = [
+        {'label': '-- X --', 'value': '__cat__X', 'disabled': True},
+        {'label': '-- Y --', 'value': '__cat__Y', 'disabled': True},
+    ]
+    assert categories.first_real_value(all_headers) is None
+    assert categories.first_real_value(all_headers, default='fallback') == 'fallback'
+
+
 # ---- (extra) the YOUR TURN UI hook is importable but unimplemented -----------
 
 def test_attach_grouped_dropdowns_is_a_your_turn_stub():

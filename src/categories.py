@@ -111,17 +111,48 @@ def build_grouped_options(indicators, header_prefix='-- ', header_suffix=' --'):
     return options
 
 
-def attach_grouped_dropdowns(app, available_indicators):
-    """Rewire app/dashboard.py's dropdowns to the category-grouped options.
-    # YOUR TURN: app/dashboard.py currently feeds each indicator dropdown a flat
-    # list via ``options=[{'label': ind, 'value': ind} for ind in
-    # available_indicators]`` (the four sites at lines ~73, ~108, ~115 and the
-    # compare pair). Replace each of those with
-    # ``options=build_grouped_options(available_indicators)``. Keep every
-    # dropdown's ``value=`` default a REAL indicator name, never a '__cat__'
-    # header -- the existing ``available_indicators[0]`` default already satisfies
-    # this since headers are not in that list. Do NOT edit app/dashboard.py from
-    # here; this is the documented wiring boundary, mirroring
-    # export.make_download_callback. No test yet.
+def first_real_value(options, default=None):
+    """Return the first SELECTABLE value in a Dash options list, else `default`.
+
+    Given a :func:`build_grouped_options`-style ``list[dict]``, return the
+    ``value`` of the FIRST entry that is a real, selectable indicator -- i.e. the
+    first dict that is NOT a disabled ``__cat__`` category header. Concretely, an
+    entry is skipped when it is disabled OR its ``value`` starts with the
+    ``'__cat__'`` sentinel; the first entry that survives both checks has its
+    ``value`` returned.
+
+    This is the single guaranteed-safe way to choose a dropdown's ``value=``
+    default so it can NEVER be a category header (selecting a disabled
+    ``__cat__`` row would be a no-op / invalid default). An empty or ``None``
+    `options` (or one that is ALL headers) returns `default`.
+
+    Pure stdlib -- no pandas / plotly / sqlite.
     """
-    raise NotImplementedError  # YOUR TURN
+    if not options:
+        return default
+    for o in options:
+        if o.get('disabled'):
+            continue
+        value = o.get('value')
+        if str(value).startswith('__cat__'):
+            continue
+        return value
+    return default
+
+
+def attach_grouped_dropdowns(app, available_indicators):
+    """Documented wiring boundary -- the rewire now lives in app/dashboard.py.
+
+    The dropdown rewire this stub used to advertise is DONE: app/dashboard.py now
+    feeds each of its three indicator dropdowns
+    (``indicator-dropdown`` / ``compare-dropdown-a`` / ``compare-dropdown-b``)
+    ``options=build_grouped_options(available_indicators)``, keeping each
+    ``value=`` default a REAL indicator name (never a '__cat__' header). The
+    :func:`first_real_value` helper above is the tested safety net that guarantees
+    a chosen default is selectable.
+
+    This function stays an importable, unimplemented hook (mirroring
+    export.make_download_callback) so nothing here imports Dash; there is nothing
+    left to wire from this side.
+    """
+    raise NotImplementedError  # wiring done in app/dashboard.py; this stays a no-op hook
