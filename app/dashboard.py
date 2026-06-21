@@ -2,12 +2,14 @@ import dash
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import plotly.express as px
+import plotly.graph_objects as go
 import pandas as pd
 import sqlite3
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from detect import get_anomalies_for_indicator
+from compare import build_comparison
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DB_PATH = os.path.join(PROJECT_ROOT, 'data', 'macro_data.db')
@@ -96,7 +98,34 @@ def serve_layout():
                     'backgroundColor': 'rgb(248, 248, 248)'
                 }
             ]
-        )
+        ),
+
+        html.Hr(),
+        html.H3('Compare Two Indicators'),
+        html.Div([
+            dcc.Dropdown(
+                id='compare-dropdown-a',
+                options=[{'label': ind, 'value': ind} for ind in available_indicators],
+                value=available_indicators[0] if available_indicators else None,
+                clearable=False,
+                style={'width': '45%', 'display': 'inline-block'}
+            ),
+            dcc.Dropdown(
+                id='compare-dropdown-b',
+                options=[{'label': ind, 'value': ind} for ind in available_indicators],
+                value=available_indicators[1] if len(available_indicators) > 1 else None,
+                clearable=False,
+                style={'width': '45%', 'display': 'inline-block', 'marginLeft': '2%'}
+            ),
+        ]),
+        dcc.Checklist(
+            id='compare-pct-change',
+            options=[{'label': ' Show as % change', 'value': 'pct'}],
+            value=[]
+        ),
+        dcc.Graph(id='compare-overlay-graph'),
+        html.Div(id='compare-corr-summary', style={'fontWeight': 'bold'}),
+        dcc.Graph(id='compare-rolling-corr-graph'),
     ])
 
 app.layout = serve_layout # Assign the layout function
@@ -166,6 +195,86 @@ def update_anomaly_table(selected_indicator):
         {'name': 'Z-Score', 'id': 'z_score', 'type': 'numeric'}
     ]
     return anomalies_df.to_dict('records'), columns
+
+def _empty_fig(title):
+    """A blank Plotly figure with just a title (used as a safe placeholder)."""
+    fig = go.Figure()
+    fig.update_layout(title=title)
+    return fig
+
+
+def build_overlay_figure(comparison, name_a, name_b):
+    """Turn a build_comparison() result into a dual y-axis overlay figure.
+
+    `comparison` is the dict returned by ``compare.build_comparison`` and its
+    ``overlay`` value is a date-indexed DataFrame with one column per indicator.
+    The two indicators usually live on very different scales, so series A goes on
+    the primary (left) y-axis and series B on a secondary (right) y-axis.
+    """
+    overlay = comparison['overlay']
+    if overlay is None or overlay.empty:
+        return _empty_fig('No overlapping dates for the selected indicators.')
+
+    fig = go.Figure()
+
+    # YOUR TURN: add the two overlay traces. Plot overlay[name_a] on the
+    # primary y-axis and overlay[name_b] on a secondary y-axis ('y2'), then call
+    # fig.update_layout(...) to define yaxis2 with overlaying='y', side='right'.
+    # The data is already aligned and (optionally) %-change transformed for you;
+    # build_comparison + its unit tests cover the math. ~5-8 lines. Until then we
+    # show an axis-less line so the page still renders and tests stay green:
+    fig.add_scatter(x=overlay.index, y=overlay[name_a], mode='lines', name=name_a)
+
+    suffix = ' (% change)' if comparison.get('pct_change') else ''
+    fig.update_layout(title=f'{name_a} vs {name_b}{suffix}')
+    return fig
+
+
+@app.callback(
+    Output('compare-overlay-graph', 'figure'),
+    Output('compare-corr-summary', 'children'),
+    Output('compare-rolling-corr-graph', 'figure'),
+    Input('compare-dropdown-a', 'value'),
+    Input('compare-dropdown-b', 'value'),
+    Input('compare-pct-change', 'value'),
+)
+def update_comparison(indicator_a, indicator_b, pct_change_value):
+    if not indicator_a or not indicator_b:
+        msg = 'Select two indicators to compare.'
+        return _empty_fig(msg), msg, _empty_fig('')
+
+    df_a = get_data_for_indicator_graph(indicator_a)
+    df_b = get_data_for_indicator_graph(indicator_b)
+
+    pct_change = bool(pct_change_value) and 'pct' in pct_change_value
+    comparison = build_comparison(
+        df_a, df_b, name_a=indicator_a, name_b=indicator_b, pct_change=pct_change
+    )
+
+    overlay_fig = build_overlay_figure(comparison, indicator_a, indicator_b)
+
+    overall = comparison['overall_corr']
+    if overall != overall:  # NaN check
+        summary = f'Not enough overlapping data to correlate {indicator_a} and {indicator_b}.'
+    else:
+        summary = (
+            f'Overall correlation ({comparison["n_overlap"]} shared points): '
+            f'{overall:.2f}  |  rolling window: {comparison["window"]}'
+        )
+
+    roll = comparison['rolling_corr'].dropna()
+    if roll.empty:
+        corr_fig = _empty_fig('Rolling correlation unavailable.')
+    else:
+        corr_fig = px.line(
+            x=roll.index, y=roll.values,
+            title=f'Rolling correlation (window={comparison["window"]})',
+            labels={'x': 'date', 'y': 'correlation'}
+        )
+        corr_fig.update_yaxes(range=[-1.05, 1.05])
+
+    return overlay_fig, summary, corr_fig
+
 
 if __name__ == '__main__':
     app.run_server(debug=True)

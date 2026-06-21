@@ -1,4 +1,6 @@
-.env 
+.env
 venv/
+.venv/
 notes/
 __pycache__
+.pytest_cache/
