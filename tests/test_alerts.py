@@ -160,6 +160,23 @@ def test_invalid_kind_and_direction_raise():
         alerts.AlertRule(indicator='X', direction='sideways')
 
 
+# --- (f) level 'both' must not fire on NaN/inf values ------------------------
+
+def test_level_both_skips_non_finite_values():
+    # The 'both' level rule is `value != threshold`; a naive form fires on NaN
+    # and inf (which are never "equal") and would emit a spurious NaN-valued row,
+    # breaking the docstring's "NaN values never fire" promise. Only the finite
+    # non-equal point (7.0) should fire here.
+    df = _make_df([5.0, np.nan, np.inf, 7.0, 5.0])
+    fired = alerts.evaluate_alert(
+        alerts.AlertRule(indicator='X', kind='level', threshold=5.0, direction='both'),
+        df,
+    )
+    assert fired['value'].tolist() == [7.0]
+    assert not fired['value'].isna().any()
+    assert _no_inf(fired)
+
+
 # --- extra: anomaly direction 'above' vs 'below' on a real spike -------------
 
 def test_anomaly_direction_above_catches_positive_spike_below_does_not():

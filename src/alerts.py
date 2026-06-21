@@ -148,8 +148,12 @@ def evaluate_alert(rule, df):
             fired_mask = value > rule.threshold       # NaN compares False
         elif rule.direction == 'below':
             fired_mask = value < rule.threshold
-        else:  # 'both' for a level rule = any value != threshold (NaN never fires)
-            fired_mask = value != rule.threshold
+        else:  # 'both' for a level rule = any finite value != threshold.
+            # `value != threshold` alone is True for NaN/inf too (they are never
+            # "equal"), so guard with np.isfinite to keep the docstring's
+            # "NaN values never fire" promise and avoid a spurious NaN-valued row.
+            finite = np.isfinite(value.to_numpy(dtype='float64'))
+            fired_mask = pd.Series(finite, index=value.index) & (value != rule.threshold)
 
         out = pd.DataFrame({
             'date': series.index,
