@@ -1,11 +1,102 @@
 # detect.py
-from scipy.stats import zscore
+"""Anomaly detection for indicator series.
+
+The scoring core is a PURE numpy/pandas *rolling* z-score -- no scipy (its
+native ``_propack`` extension fails to dlopen in this environment) and no
+database/network dependency, so the helpers below can be unit-tested against
+synthetic data. A value is flagged when it deviates from its *local* trailing
+window rather than from a single global mean/std over the whole series, which
+catches regime-relative spikes a global z-score misses.
+"""
+import numpy as np
 import pandas as pd
 import sqlite3
 
 DB_PATH = 'data/macro_data.db'
 
-def calc_and_store_anomalies_for_indicator(indicator_name, z_threshold=3):
+
+def rolling_zscore(values, window=12, min_periods=None):
+    """Trailing rolling z-score of a 1-D numeric series (pure numpy/pandas).
+
+    Each point is scored against the mean/std of the ``window`` observations up
+    to and including it, so the result reflects how unusual a value is relative
+    to its *recent* neighborhood rather than the whole sample.
+
+    Parameters
+    ----------
+    values : pandas.Series or 1-D array-like
+        Coerced to numeric with ``errors='coerce'`` (non-numbers -> NaN).
+    window : int
+        Number of trailing observations in each rolling window. The effective
+        window is clamped to ``max(2, min(window, len(s)))`` -- the same way
+        compare.py clamps its rolling window -- so a window wider than the data
+        does not blow up on short series.
+    min_periods : int or None
+        Minimum observations required to emit a (non-NaN) score. Defaults to the
+        effective window, so the first ``eff_window - 1`` rows are NaN (not yet
+        enough local history) instead of being scored off a tiny sample.
+
+    Returns
+    -------
+    pandas.Series
+        Float z-scores aligned to the input's index. Empty in -> empty out.
+
+    Notes
+    -----
+    A flat / zero-variance trailing window makes the rolling std 0, so
+    ``(s - mean) / std`` is 0/0 -> NaN (and could be +/-inf where a deviation
+    meets a 0 std). Infinities are scrubbed to NaN; a NaN z-score means
+    "not enough information / no variance", which downstream code treats as
+    *not* an anomaly (NaN never compares ``> threshold``).
+    """
+    s = values if isinstance(values, pd.Series) else pd.Series(values)
+    # Coerce first (errors='coerce' turns non-numbers into NaN) THEN cast, so a
+    # string array-like does not raise on construction.
+    s = pd.to_numeric(s, errors='coerce').astype('float64')
+
+    n = len(s)
+    if n == 0:
+        return pd.Series(dtype='float64', index=s.index, name='z_score')
+
+    eff_window = max(2, min(window, n))
+    eff_min_periods = eff_window if min_periods is None else min_periods
+
+    roll = s.rolling(window=eff_window, min_periods=eff_min_periods)
+    std = roll.std(ddof=0)
+    z = (s - roll.mean()) / std
+    # Scrub 0/0 -> NaN and (deviation)/0 -> +/-inf; both mean "no usable local
+    # context", so they must not register as anomalies.
+    z = z.replace([np.inf, -np.inf], np.nan)
+    z.name = 'z_score'
+    return z
+
+
+def detect_anomalies(values, window=12, z_threshold=3.0, min_periods=None):
+    """Flag local anomalies via the rolling z-score.
+
+    Wraps :func:`rolling_zscore` and returns a DataFrame with the original
+    ``value``, its rolling ``z_score`` (NaN where there is not enough local
+    history or the window has zero variance), and a boolean ``is_outlier`` mask
+    that is True only where ``abs(z) > z_threshold``. NaN z-scores compare
+    False, so a flat / short window never produces a spurious anomaly.
+
+    The ``z_score`` column is what gets persisted into the existing
+    ``anomaly_data.z_score`` field.
+    """
+    z = rolling_zscore(values, window=window, min_periods=min_periods)
+    s = pd.to_numeric(
+        values if isinstance(values, pd.Series) else pd.Series(values),
+        errors='coerce',
+    ).astype('float64')
+    s.index = z.index  # keep value + z aligned even for raw array-like input
+
+    out = pd.DataFrame({'value': s, 'z_score': z})
+    # abs() of NaN is NaN, and NaN > threshold is False -> not an outlier.
+    out['is_outlier'] = out['z_score'].abs() > z_threshold
+    return out
+
+
+def calc_and_store_anomalies_for_indicator(indicator_name, z_threshold=3, window=12):
     """
     Calculates Z-score anomalies for a specific indicator and stores them in the anomaly_data table.
     """
@@ -50,20 +141,19 @@ def calc_and_store_anomalies_for_indicator(indicator_name, z_threshold=3):
             conn.commit()
             return pd.DataFrame()
 
-        # Calculate Z-score. Handle potential for all values being the same (std dev = 0)
-        try:
-            # zscore might produce NaNs if std is 0, or runtime warnings.
-            # We can pre-check or handle the output.
-            if df_indicator_data['value'].std() == 0:
-                 df_indicator_data['z_score'] = 0.0 # Or handle as no anomalies if all values are identical
-            else:
-                df_indicator_data['z_score'] = zscore(df_indicator_data['value'])
-        except Exception as e_zscore:
-            print(f"Warning: Could not calculate z-score for {indicator_name}, possibly due to uniform values or other error: {e_zscore}")
-            df_indicator_data['z_score'] = 0.0 # Assign a default or skip
+        # Score each point against its LOCAL trailing window (pure numpy/pandas;
+        # no scipy). detect_anomalies scrubs inf and leaves NaN where a window is
+        # flat or too short, and NaN never registers as an outlier.
+        scored = detect_anomalies(
+            df_indicator_data['value'],
+            window=window,
+            z_threshold=z_threshold,
+        )
+        df_indicator_data['z_score'] = scored['z_score'].values
+        df_indicator_data['is_outlier'] = scored['is_outlier'].values
 
-        df_indicator_data['is_outlier'] = df_indicator_data['z_score'].abs() > z_threshold
-        
+        # NaN z-scores (no local context / zero variance) are not anomalies and
+        # must not be persisted as spurious rows.
         outliers_df = df_indicator_data[df_indicator_data['is_outlier']].copy()
         
         # Remove old anomalies for the current indicator before inserting new ones
