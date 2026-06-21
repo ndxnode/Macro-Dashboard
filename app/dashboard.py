@@ -235,16 +235,24 @@ def build_overlay_figure(comparison, name_a, name_b):
 
     fig = go.Figure()
 
-    # YOUR TURN: add the two overlay traces. Plot overlay[name_a] on the
-    # primary y-axis and overlay[name_b] on a secondary y-axis ('y2'), then call
-    # fig.update_layout(...) to define yaxis2 with overlaying='y', side='right'.
-    # The data is already aligned and (optionally) %-change transformed for you;
-    # build_comparison + its unit tests cover the math. ~5-8 lines. Until then we
-    # show an axis-less line so the page still renders and tests stay green:
+    # Series A on the primary (left) y-axis; series B on a secondary (right)
+    # y-axis so two very different scales can share one chart. The data is
+    # already aligned and (optionally) %-change transformed by build_comparison.
     fig.add_scatter(x=overlay.index, y=overlay[name_a], mode='lines', name=name_a)
+    fig.add_scatter(
+        x=overlay.index, y=overlay[name_b], mode='lines', name=name_b, yaxis='y2'
+    )
 
     suffix = ' (% change)' if comparison.get('pct_change') else ''
-    fig.update_layout(title=f'{name_a} vs {name_b}{suffix}')
+    fig.update_layout(
+        title=f'{name_a} vs {name_b}{suffix}',
+        yaxis2=dict(overlaying='y', side='right'),
+    )
+    # YOUR TURN: tell the two axes apart at a glance. Give each y-axis its own
+    # title (yaxis_title=name_a) and colour the right axis to match series B's
+    # line -- set yaxis2's title/tickfont colour to the second trace's colour
+    # (e.g. fig.data[1].line.color) so a reader knows which series each axis
+    # belongs to. Comment only for now; ~3-4 lines when you fill it in.
     return fig
 
 
