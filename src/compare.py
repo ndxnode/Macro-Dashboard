@@ -52,10 +52,18 @@ def pct_change_transform(aligned, periods=1):
     different scales (e.g. a price index vs. a rate) can share one y-axis.
     Result is expressed in percent (multiplied by 100). The first ``periods``
     rows are NaN by construction and are dropped.
+
+    A prior value of exactly 0 makes ``pct_change`` produce ``+/-inf`` (a real
+    case for macro data: a rate pinned at the zero lower bound, a net-change
+    series, etc.). Those infinities are treated as missing (NaN) so they are
+    excluded from downstream correlations instead of silently poisoning every
+    Pearson r to NaN -- ``inf`` survives ``dropna``/``.corr`` and would wipe out
+    an otherwise computable correlation.
     """
     if aligned is None or aligned.empty:
         return aligned.copy() if aligned is not None else aligned
     pct = aligned.pct_change(periods=periods) * 100.0
+    pct = pct.replace([np.inf, -np.inf], np.nan)
     return pct.dropna(how='all')
 
 

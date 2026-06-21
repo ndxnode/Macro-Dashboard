@@ -121,3 +121,48 @@ def test_empty_inputs_are_handled_gracefully():
     result = compare.build_comparison(empty, empty)
     assert result['n_overlap'] == 0
     assert np.isnan(result['overall_corr'])
+
+
+def test_pct_change_handles_zero_prior_value_without_inf():
+    """A prior value of 0 makes raw pct_change emit +/-inf; the transform must
+    turn those into NaN so they never reach a correlation. inf survives dropna
+    and silently collapses every Pearson r to NaN, so this is a real hazard for
+    macro data that legitimately touches zero (e.g. a rate at the zero bound)."""
+    a = _make_series(values=[0.0, 10.0, 20.0, 40.0], periods=4)   # 0 -> 10 = +inf%
+    b = _make_series(values=[1.0, 2.0, 3.0, 4.0], periods=4)
+    aligned = compare.align_series(a, b, name_a='a', name_b='b')
+    pct = compare.pct_change_transform(aligned)
+    assert not np.isinf(pct.to_numpy()).any()
+    # The first transformed row for column 'a' is inf->NaN; later rows are finite.
+    assert np.isnan(pct['a'].iloc[0])
+    assert np.isfinite(pct['a'].iloc[1:]).all()
+
+
+def test_build_comparison_pct_change_with_zero_still_correlates():
+    """With the inf scrubbed out there are still enough finite, paired points to
+    compute a correlation -- before the fix the lone inf poisoned overall_corr
+    and the whole rolling series to NaN despite valid overlapping data.
+
+    The finite region carries real variance (the growth rates differ), so the
+    test distinguishes "inf wiped out the result" from a legitimate zero-variance
+    NaN. Without the fix overall_corr is NaN; with it the finite points correlate.
+    """
+    # 'a' starts at 0 (-> +inf% on the first step) then has varied growth rates.
+    a = _make_series(values=[0.0, 10.0, 12.0, 18.0, 19.0, 26.0], periods=6)
+    b = _make_series(values=[5.0, 10.0, 13.0, 17.0, 21.0, 24.0], periods=6)
+    result = compare.build_comparison(
+        a, b, name_a='a', name_b='b', window=3, pct_change=True
+    )
+    # inf row in 'a' is dropped pairwise; remaining finite points correlate.
+    assert np.isfinite(result['overall_corr'])
+    assert result['rolling_corr'].notna().any()
+
+
+def test_rolling_correlation_zero_variance_window_is_nan():
+    """The docstring promises constant (zero-variance) windows yield NaN rather
+    than a spurious correlation value."""
+    a = _make_series(values=[5.0] * 10, periods=10)              # constant
+    b = _make_series(values=np.arange(10.0), periods=10)
+    aligned = compare.align_series(a, b, name_a='a', name_b='b')
+    roll = compare.rolling_correlation(aligned, window=4)
+    assert roll.isna().all()
