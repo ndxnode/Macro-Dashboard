@@ -237,7 +237,7 @@ if __name__ == '__main__':
                 print(f"Found indicators: {indicators_in_db}")
                 for indicator in indicators_in_db:
                     print(f"\nProcessing anomalies for: {indicator}")
-                    calculate_and_store_anomalies_for_indicator(indicator)
+                    calc_and_store_anomalies_for_indicator(indicator)
                 print("\nFinished processing anomalies for all indicators.")
     except sqlite3.Error as e:
         print(f"Database error in detect.py __main__: {e}")

@@ -1,6 +1,6 @@
 import dash
 from dash import dcc, html, dash_table
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
@@ -11,6 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from detect import get_anomalies_for_indicator
 from compare import build_comparison
 from categories import build_grouped_options, first_real_value
+import alerts  # pure, scipy-free -> importing it keeps `import app.dashboard` OK offline
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DB_PATH = os.path.join(PROJECT_ROOT, 'data', 'macro_data.db')
@@ -94,6 +95,62 @@ def serve_layout():
         html.H3('Detected Anomalies'),
         dash_table.DataTable(
             id='anomaly-table',
+            columns=[
+                {'name': 'Date', 'id': 'date'},
+                {'name': 'Value', 'id': 'value'},
+                {'name': 'Z-Score', 'id': 'z_score'}
+            ],
+            data=[],
+            page_size=10,
+            style_cell={'textAlign': 'left'},
+            style_header={
+                'backgroundColor': 'lightgrey',
+                'fontWeight': 'bold'
+            },
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},
+                    'backgroundColor': 'rgb(248, 248, 248)'
+                }
+            ]
+        ),
+
+        html.Hr(),
+        # --- User-defined alerts panel (thin wiring over alerts.build_alerts_payload) ---
+        html.H3('Alerts'),
+        dcc.Dropdown(
+            id='alert-indicator-dropdown',
+            options=build_grouped_options(available_indicators),
+            value=first_real_value(build_grouped_options(available_indicators)),
+            clearable=False
+        ),
+        dcc.RadioItems(
+            id='alert-kind',
+            options=[
+                {'label': ' Anomaly (rolling-z)', 'value': 'anomaly'},
+                {'label': ' Level (raw value)', 'value': 'level'},
+            ],
+            value='anomaly',
+        ),
+        dcc.RadioItems(
+            id='alert-direction',
+            options=[
+                {'label': ' Above', 'value': 'above'},
+                {'label': ' Below', 'value': 'below'},
+                {'label': ' Both', 'value': 'both'},
+            ],
+            value='both',
+        ),
+        # threshold min=0 sidesteps the degenerate anomaly/below double-minus
+        # verb ("z=--3"); a positive z-magnitude is the conventional input.
+        dcc.Input(id='alert-threshold', type='number', value=3.0, min=0,
+                  placeholder='threshold'),
+        dcc.Input(id='alert-window', type='number', value=12, min=1,
+                  placeholder='window'),
+        html.Button('Run alert', id='alert-run-button', n_clicks=0),
+        html.Div(id='alert-summary', style={'fontWeight': 'bold'}),
+        dash_table.DataTable(
+            id='alert-table',
             columns=[
                 {'name': 'Date', 'id': 'date'},
                 {'name': 'Value', 'id': 'value'},
@@ -213,6 +270,62 @@ def update_anomaly_table(selected_indicator):
         {'name': 'Z-Score', 'id': 'z_score', 'type': 'numeric'}
     ]
     return anomalies_df.to_dict('records'), columns
+
+
+@app.callback(
+    Output('alert-summary', 'children'),
+    Output('alert-table', 'data'),
+    Input('alert-run-button', 'n_clicks'),
+    State('alert-indicator-dropdown', 'value'),
+    State('alert-kind', 'value'),
+    State('alert-direction', 'value'),
+    State('alert-threshold', 'value'),
+    State('alert-window', 'value'),
+)
+def update_alert_panel(n_clicks, indicator, kind, direction, threshold, window):
+    """Run one user-defined alert and render its summary + firing rows.
+
+    Builds an :class:`alerts.AlertRule` from the panel inputs, fetches the
+    indicator's tidy {'date','value'} frame via the EXISTING
+    ``get_data_for_indicator_graph`` path, and renders the PURE
+    ``alerts.build_alerts_payload`` result -- the one-line summary into
+    'alert-summary' and the firing rows into 'alert-table'.
+    """
+    # YOUR TURN: this is the documented LIVE-DATA boundary (like the other
+    # get_*_for_indicator paths). OFFLINE there are no macro_data.db rows, so
+    # get_data_for_indicator_graph returns the empty {'date','value'} frame ->
+    # build_alerts_payload degrades to "No alerts." + an empty table and NEVER
+    # crashes. A learner who populates macro_data.db (run etl.py) sees real
+    # firings here; the pure core in alerts.py is the tested part, this callback
+    # is the thin hook. Do not add a DataTable test that needs a live server/DB.
+    if not indicator:
+        return 'No alerts.', []
+
+    try:
+        rule = alerts.AlertRule(
+            indicator=indicator,
+            kind=kind or 'anomaly',
+            threshold=float(threshold) if threshold is not None else 3.0,
+            window=int(window) if window is not None else 12,
+            direction=direction or 'both',
+        )
+    except (ValueError, TypeError):
+        # An invalid kind/direction (shouldn't happen via the RadioItems) ->
+        # degrade gracefully rather than 500 the callback.
+        return 'No alerts.', []
+
+    df = get_data_for_indicator_graph(indicator)
+    payload = alerts.build_alerts_payload({indicator: df}, [rule])
+    result = payload[0]
+
+    fired = result['fired'].copy()
+    if 'z_score' in fired.columns:
+        fired['z_score'] = fired['z_score'].round(2)
+    if not fired.empty:
+        fired['date'] = pd.to_datetime(fired['date']).dt.strftime('%Y-%m-%d')
+
+    return result['summary'], fired.to_dict('records')
+
 
 def _empty_fig(title):
     """A blank Plotly figure with just a title (used as a safe placeholder)."""

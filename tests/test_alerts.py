@@ -283,3 +283,77 @@ def test_summarize_alert_both_direction_verbs():
     an_summary = alerts.summarize_alert(an_rule, an_fired)
     assert '|z|>3' in an_summary
     assert 'z=' in an_summary  # anomaly summaries carry the real z
+
+
+# --- (k) build_alerts_payload: empty/None rules -> [] ------------------------
+
+def test_build_alerts_payload_empty_or_none_rules_is_empty_list():
+    frames = {'X': _make_df([1.0, 2.0, 3.0])}
+    assert alerts.build_alerts_payload(frames, []) == []
+    assert alerts.build_alerts_payload(frames, None) == []
+    # Empty frames dict with no rules is also fine.
+    assert alerts.build_alerts_payload({}, []) == []
+
+
+# --- (l) build_alerts_payload: order preserved, matches standalone calls -----
+
+def test_build_alerts_payload_order_and_matches_standalone():
+    # Two rules over a frames dict; payload order == input order and each entry's
+    # fired/summary byte-equals the standalone evaluate_alert/summarize_alert.
+    df_a = _make_df([1.0, 5.0, 5.0, 9.0, 2.0, 7.0])
+    df_b = _make_df([10.0, 20.0, 30.0, 40.0])
+    frames = {'A': df_a, 'B': df_b}
+
+    rule_a = alerts.AlertRule(indicator='A', kind='level', threshold=5.0,
+                              direction='above')
+    rule_b = alerts.AlertRule(indicator='B', kind='level', threshold=25.0,
+                              direction='above')
+    payload = alerts.build_alerts_payload(frames, [rule_a, rule_b])
+
+    assert [p['indicator'] for p in payload] == ['A', 'B']  # input order preserved
+    assert [p['rule'] for p in payload] == [rule_a, rule_b]
+
+    for rule, df, entry in [(rule_a, df_a, payload[0]), (rule_b, df_b, payload[1])]:
+        expected_fired = alerts.evaluate_alert(rule, df)
+        expected_summary = alerts.summarize_alert(rule, expected_fired)
+        pd.testing.assert_frame_equal(entry['fired'], expected_fired)
+        assert entry['n_fired'] == len(entry['fired']) == len(expected_fired)
+        assert entry['summary'] == expected_summary  # byte-equal
+
+
+# --- (m) build_alerts_payload: missing indicator -> "No alerts.", no KeyError -
+
+def test_build_alerts_payload_missing_indicator_degrades_no_keyerror():
+    frames = {'A': _make_df([1.0, 9.0])}  # 'MISSING' is absent
+    rule = alerts.AlertRule(indicator='MISSING', kind='level', threshold=5.0,
+                            direction='above')
+    payload = alerts.build_alerts_payload(frames, [rule])
+
+    assert len(payload) == 1
+    entry = payload[0]
+    assert entry['indicator'] == 'MISSING'
+    assert entry['n_fired'] == 0
+    assert len(entry['fired']) == 0
+    assert list(entry['fired'].columns) == ['date', 'value', 'z_score']
+    assert entry['summary'] == 'No alerts.'
+    # An explicit None frame value degrades the same way (no KeyError either).
+    payload_none = alerts.build_alerts_payload({'MISSING': None}, [rule])
+    assert payload_none[0]['summary'] == 'No alerts.'
+    assert payload_none[0]['n_fired'] == 0
+
+
+# --- (n) build_alerts_payload: a firing level rule locks n_fired + summary ----
+
+def test_build_alerts_payload_firing_rule_locks_count_and_summary():
+    # Reuse the [1,5,5,9,2,7] / threshold-5 fixture: level-above fires {9,7}.
+    df = _make_df([1.0, 5.0, 5.0, 9.0, 2.0, 7.0])
+    rule = alerts.AlertRule(indicator='UNRATE', kind='level', threshold=5.0,
+                            direction='above')
+    payload = alerts.build_alerts_payload({'UNRATE': df}, [rule])
+
+    entry = payload[0]
+    assert entry['n_fired'] == 2                       # two firing points, known
+    assert entry['n_fired'] == len(entry['fired'])
+    assert entry['summary'] != 'No alerts.'            # it fired
+    assert 'above level 5' in entry['summary']         # non-"No alerts." substring
+    assert entry['indicator'] == 'UNRATE'

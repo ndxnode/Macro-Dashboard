@@ -154,3 +154,16 @@ def test_array_like_input_is_accepted():
     out = detect.detect_anomalies(arr, window=12, z_threshold=3.0)
     assert len(out) == len(arr)
     assert bool(out['is_outlier'].iloc[15]) is True
+
+
+# --- name-smoke: the __main__ helper name is the SHORT one, not the typo -----
+
+def test_calc_and_store_helper_name_is_canonical():
+    # detect.py's __main__ block used to call the LONG name
+    # `calculate_and_store_anomalies_for_indicator`, which does not exist (the
+    # real fn at line ~99 is the SHORT `calc_and_store_anomalies_for_indicator`)
+    # -> a NameError on a script run. Lock the canonical short name in and assert
+    # the typo is gone so it can't silently creep back.
+    assert hasattr(detect, 'calc_and_store_anomalies_for_indicator')
+    assert callable(detect.calc_and_store_anomalies_for_indicator)
+    assert not hasattr(detect, 'calculate_and_store_anomalies_for_indicator')

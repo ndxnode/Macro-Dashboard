@@ -10,8 +10,13 @@ rolling-z anomaly core via :func:`detect.detect_anomalies`, so the "anomaly"
 alert kind shares exactly one scoring path with the rest of the app.
 
 An :class:`AlertRule` describes what to watch; :func:`evaluate_alert` returns the
-firing rows. Persisting fired alerts to sqlite is deliberately kept OUT of this
-module (any such wrapper must do its own ``import sqlite3`` and stay out of
+firing rows and :func:`summarize_alert` renders a one-line summary.
+:func:`build_alerts_payload` is the single PURE entry the UI calls: it maps a
+``{indicator -> frame}`` dict plus a list of rules to an ordered list of
+per-rule ``{'rule','indicator','fired','n_fired','summary'}`` dicts (a missing
+indicator degrades to the empty/"No alerts." case, never a ``KeyError``).
+Persisting fired alerts to sqlite is deliberately kept OUT of this module (any
+such wrapper must do its own ``import sqlite3`` and stay out of
 ``evaluate_alert``) so tests never open a DB.
 """
 from dataclasses import dataclass
@@ -241,3 +246,56 @@ def summarize_alert(rule, fired):
         summary += f", z={last['z_score']:g}"
     summary += ')'
     return summary
+
+
+def build_alerts_payload(indicator_frames, rules):
+    """Map ``{indicator -> frame}`` + a list of rules to ordered per-rule results.
+
+    This is the single PURE entry the UI calls. PURE -- no I/O, no Dash, no
+    sqlite, no network, no plotly; it reuses only the in-module
+    :func:`evaluate_alert` + :func:`summarize_alert`.
+
+    Parameters
+    ----------
+    indicator_frames : dict
+        ``{indicator_name(str) -> tidy {'date','value'} DataFrame}``. A rule
+        whose ``indicator`` is absent (missing key / ``None`` value) is treated
+        as having an EMPTY frame, so ``fired`` is the canonical empty result and
+        ``summary`` is ``"No alerts."`` -- this NEVER raises ``KeyError``.
+    rules : iterable of AlertRule (or ``None``)
+        ``None``/empty -> ``[]``.
+
+    Returns
+    -------
+    list[dict]
+        One dict per rule, IN INPUT ORDER::
+
+            {'rule': rule,
+             'indicator': rule.indicator,
+             'fired': <evaluate_alert(rule, df) DataFrame>,
+             'n_fired': int(len(fired)),
+             'summary': <summarize_alert(rule, fired) str>}
+
+        ``n_fired == len(fired)`` and the ``fired``/``summary`` values are
+        byte-identical to calling :func:`evaluate_alert` /
+        :func:`summarize_alert` standalone on the same ``df``.
+    """
+    payload = []
+    if not rules:
+        return payload
+
+    for rule in rules:
+        # .get(...) so a missing indicator yields None -> evaluate_alert's
+        # empty-frame path (never a KeyError); summarize_alert then returns
+        # the literal "No alerts.".
+        df = indicator_frames.get(rule.indicator) if indicator_frames else None
+        fired = evaluate_alert(rule, df)
+        summary = summarize_alert(rule, fired)
+        payload.append({
+            'rule': rule,
+            'indicator': rule.indicator,
+            'fired': fired,
+            'n_fired': int(len(fired)),
+            'summary': summary,
+        })
+    return payload
