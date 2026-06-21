@@ -144,3 +144,63 @@ def test_empty_and_none_frames_do_not_raise():
     fig_none = export.build_export_figure(None)
     assert isinstance(fig_empty, go.Figure) and len(fig_empty.data) == 0
     assert isinstance(fig_none, go.Figure) and len(fig_none.data) == 0
+
+
+# ---- (e) download_filename ---------------------------------------------------
+
+def test_download_filename_two_series_with_preset():
+    assert export.download_filename('GDP', 'CPI', '5Y') == 'GDP_vs_CPI_5Y.csv'
+
+
+def test_download_filename_single_series_no_preset():
+    # name_b None -> just the one part; no preset token appended.
+    assert export.download_filename('GDP') == 'GDP.csv'
+    assert export.download_filename('GDP', None, None) == 'GDP.csv'
+
+
+def test_download_filename_sanitizes_unsafe_chars():
+    # Spaces / slashes / other unsafe chars become underscores; the two series
+    # join with the 'vs' connector.
+    assert export.download_filename('CPI All Items', 'A/B') == 'CPI_All_Items_vs_A_B.csv'
+
+
+def test_download_filename_falls_back_to_export_when_no_usable_parts():
+    # Empty / None / whitespace-only parts are dropped -> 'export' stem.
+    assert export.download_filename(None, None) == 'export.csv'
+    assert export.download_filename('', '   ') == 'export.csv'
+    # A truthy preset still cannot rescue a missing stem on its own? It is a part,
+    # so it DOES contribute -- but with no names AND no preset, fall back.
+    assert export.download_filename(None) == 'export.csv'
+
+
+def test_download_filename_custom_ext():
+    assert export.download_filename('GDP', ext='txt') == 'GDP.txt'
+
+
+def test_download_filename_preset_only_appended_when_truthy():
+    # An empty / None preset is NOT appended.
+    assert export.download_filename('GDP', 'CPI', '') == 'GDP_vs_CPI.csv'
+    assert export.download_filename('GDP', 'CPI', None) == 'GDP_vs_CPI.csv'
+
+
+# ---- (f) preset_years --------------------------------------------------------
+
+def test_preset_years_known_tokens():
+    assert export.preset_years('1Y') == 1
+    assert export.preset_years('5Y') == 5
+    assert export.preset_years('10Y') == 10
+
+
+def test_preset_years_max_none_and_unknown_are_identity():
+    assert export.preset_years('Max') is None
+    assert export.preset_years(None) is None
+    assert export.preset_years('bogus') is None
+
+
+def test_preset_years_feeds_clip_to_last_years_1y_window():
+    # Integration-style: '1Y' -> 1 -> the same 1-year window clip tests cover.
+    frame = _make_overlay(n=120)  # 10 years monthly
+    clipped = export.clip_to_last_years(frame, export.preset_years('1Y'))
+    assert len(clipped) == 13
+    # 'Max' -> None -> identity (no clip).
+    assert len(export.clip_to_last_years(frame, export.preset_years('Max'))) == len(frame)

@@ -11,6 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from detect import get_anomalies_for_indicator
 from compare import build_comparison
 from categories import build_grouped_options, first_real_value
+from export import clip_to_last_years, preset_years, make_download_callback
 import alerts  # pure, scipy-free -> importing it keeps `import app.dashboard` OK offline
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -198,6 +199,19 @@ def serve_layout():
             options=[{'label': ' Show as % change', 'value': 'pct'}],
             value=[]
         ),
+        # Date-range preset buttons (1Y / 5Y / Max) clip the overlay FIGURE (and
+        # the CSV download) to its last N years via export.clip_to_last_years.
+        # The chosen token lives in compare-range-store (default 'Max' = no clip);
+        # set_compare_range writes it and update_comparison/the download read it.
+        html.Div([
+            html.Button('1Y', id='range-1y', n_clicks=0),
+            html.Button('5Y', id='range-5y', n_clicks=0),
+            html.Button('Max', id='range-max', n_clicks=0),
+            html.Button('Download CSV', id='compare-download-button', n_clicks=0,
+                        style={'marginLeft': '1em'}),
+        ]),
+        dcc.Store(id='compare-range-store', data='Max'),
+        dcc.Download(id='compare-download'),
         dcc.Graph(id='compare-overlay-graph'),
         html.Div(id='compare-corr-summary', style={'fontWeight': 'bold'}),
         dcc.Graph(id='compare-rolling-corr-graph'),
@@ -376,8 +390,9 @@ def build_overlay_figure(comparison, name_a, name_b):
     Input('compare-dropdown-a', 'value'),
     Input('compare-dropdown-b', 'value'),
     Input('compare-pct-change', 'value'),
+    Input('compare-range-store', 'data'),
 )
-def update_comparison(indicator_a, indicator_b, pct_change_value):
+def update_comparison(indicator_a, indicator_b, pct_change_value, range_token):
     if not indicator_a or not indicator_b:
         msg = 'Select two indicators to compare.'
         return _empty_fig(msg), msg, _empty_fig('')
@@ -390,6 +405,12 @@ def update_comparison(indicator_a, indicator_b, pct_change_value):
         df_a, df_b, name_a=indicator_a, name_b=indicator_b, pct_change=pct_change
     )
 
+    # Clip ONLY the overlay figure to the selected preset so the chart matches
+    # the CSV download. The rolling-corr/summary stay on the unclipped overlap.
+    # Offline the overlay is empty -> clip_to_last_years returns it as-is.
+    comparison['overlay'] = clip_to_last_years(
+        comparison['overlay'], preset_years(range_token)
+    )
     overlay_fig = build_overlay_figure(comparison, indicator_a, indicator_b)
 
     overall = comparison['overall_corr']
@@ -413,6 +434,34 @@ def update_comparison(indicator_a, indicator_b, pct_change_value):
         corr_fig.update_yaxes(range=[-1.05, 1.05])
 
     return overlay_fig, summary, corr_fig
+
+
+@app.callback(
+    Output('compare-range-store', 'data'),
+    Input('range-1y', 'n_clicks'),
+    Input('range-5y', 'n_clicks'),
+    Input('range-max', 'n_clicks'),
+)
+def set_compare_range(n1, n5, nmax):
+    """Map the most-recently-clicked preset button to a range token in the store.
+
+    Uses ``dash.callback_context`` to see which button fired and writes the
+    matching token ('1Y' / '5Y' / 'Max') into ``compare-range-store``. On the
+    initial load (nothing triggered) it defaults to 'Max' (no clip). The token is
+    read by update_comparison (clips the overlay figure) and the download
+    callback (clips the CSV) via ``export.preset_years`` -> ``clip_to_last_years``.
+    """
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return 'Max'
+    fired = ctx.triggered[0]['prop_id'].split('.')[0]
+    return {'range-1y': '1Y', 'range-5y': '5Y', 'range-max': 'Max'}.get(fired, 'Max')
+
+
+# Wire the CSV download ONCE, after the app + its callbacks are defined. export
+# injects no dashboard/sqlite/plotly import at module top: we hand it our own
+# data-fetch + build_comparison so it only needs dcc + its pure helpers.
+make_download_callback(app, get_data_for_indicator_graph, build_comparison)
 
 
 if __name__ == '__main__':
