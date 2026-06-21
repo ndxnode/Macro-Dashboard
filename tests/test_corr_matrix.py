@@ -77,6 +77,16 @@ def test_empty_dict_returns_empty_frame_no_raise():
     assert M.shape == (0, 0)
 
 
+def test_none_mapping_returns_empty_frame_no_raise():
+    # A falsy mapping (None) must collapse to the SAME canonical empty 0x0 frame
+    # as {} -- mirroring alerts.build_alerts_payload's `if indicator_frames`
+    # tolerance for the identical {indicator -> frame} argument. (Without the
+    # falsy-guard, sorted(None.keys()) raised an opaque AttributeError.)
+    M = corr_matrix.correlation_matrix(None)
+    assert isinstance(M, pd.DataFrame)
+    assert M.shape == (0, 0)
+
+
 def test_single_indicator_is_1x1_unit():
     M = corr_matrix.correlation_matrix({'A': _frame(np.arange(10, dtype='float64'))})
     assert list(M.index) == ['A']

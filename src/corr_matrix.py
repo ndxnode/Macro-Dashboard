@@ -77,11 +77,15 @@ def correlation_matrix(indicator_frames, method='pearson', min_overlap=3):
     ``method`` and ``min_overlap`` are pass-throughs to ``DataFrame.corr``
     (``min_periods=min_overlap`` is exactly the NaN-on-thin-overlap guard).
     """
-    names = sorted(indicator_frames.keys())
-
-    # DECISION 1: guard the empty dict -- pd.concat([]) would raise.
-    if not names:
+    # DECISION 1: guard a falsy mapping (None or empty dict) -- ``None`` has no
+    # ``.keys()`` (an opaque AttributeError) and ``pd.concat([])`` would raise on
+    # an empty dict, so both collapse to the canonical empty 0x0 frame BEFORE the
+    # concat. This mirrors ``alerts.build_alerts_payload``'s ``if indicator_frames``
+    # tolerance for the identical ``{indicator -> frame}`` argument shape.
+    if not indicator_frames:
         return pd.DataFrame()
+
+    names = sorted(indicator_frames.keys())
 
     series = [_to_dated_series(indicator_frames[n], name=n) for n in names]
     # DECISION 2: outer join keeps each pair's overlap pairwise-complete.
