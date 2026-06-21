@@ -66,6 +66,11 @@ available_indicators = get_distinct_indicators()
 
 # Define the layout as a function to ensure it's fresh on page load
 def serve_layout():
+    # Build the grouped compare options once and reuse for both compare
+    # dropdowns; dropdown-a defaults to the first selectable indicator and
+    # dropdown-b to the first selectable indicator DISTINCT from a's default.
+    _compare_options = build_grouped_options(available_indicators)
+    _compare_default_a = first_real_value(_compare_options)
     return html.Div([
         html.H1('FRED Macro Dashboard'),
         
@@ -114,15 +119,19 @@ def serve_layout():
         html.Div([
             dcc.Dropdown(
                 id='compare-dropdown-a',
-                options=build_grouped_options(available_indicators),
-                value=first_real_value(build_grouped_options(available_indicators)),
+                options=_compare_options,
+                value=_compare_default_a,
                 clearable=False,
                 style={'width': '45%', 'display': 'inline-block'}
             ),
             dcc.Dropdown(
                 id='compare-dropdown-b',
-                options=build_grouped_options(available_indicators),
-                value=available_indicators[1] if len(available_indicators) > 1 else None,
+                options=_compare_options,
+                # Default to the first selectable indicator that is NOT the one
+                # dropdown-a defaults to, so the compare view never opens
+                # comparing an indicator to itself. Falls to None when there is
+                # only one (or zero) indicator -- no IndexError, no self-compare.
+                value=first_real_value(_compare_options, exclude=_compare_default_a),
                 clearable=False,
                 style={'width': '45%', 'display': 'inline-block', 'marginLeft': '2%'}
             ),

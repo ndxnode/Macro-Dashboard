@@ -181,6 +181,54 @@ def test_first_real_value_all_headers_returns_default():
     assert categories.first_real_value(all_headers, default='fallback') == 'fallback'
 
 
+# ---- (9) first_real_value exclude=: the compare pair never self-compares ----
+
+def test_first_real_value_exclude_picks_a_distinct_value():
+    # The compare-dropdown-b use case: exclude a's default so the second dropdown
+    # never lands on the same indicator (a degenerate self-comparison).
+    options = categories.build_grouped_options(['CPI', 'GDP'])
+    a = categories.first_real_value(options)
+    b = categories.first_real_value(options, exclude=a)
+    assert a is not None and b is not None
+    assert a != b
+    assert not str(b).startswith('__cat__')
+
+
+def test_first_real_value_exclude_compare_pair_never_collides_on_alpha_feed():
+    # Regression: dropdown-a (first_real_value, re-sorted by CATEGORY_ORDER) used
+    # to collide with dropdown-b (formerly available_indicators[1]) on a real
+    # alphabetical DB feed, e.g. ['CPI', 'GDP'] -> both defaulted to 'GDP'. With
+    # exclude=, b is always distinct from a across every alphabetical subset.
+    from itertools import combinations
+    names = list(categories.INDICATOR_CATEGORY.keys()) + ['Mystery Series']
+    for r in range(2, len(names) + 1):
+        for combo in combinations(names, r):
+            available = sorted(combo)  # mirror SELECT DISTINCT ... ORDER BY indicator
+            options = categories.build_grouped_options(available)
+            a = categories.first_real_value(options)
+            b = categories.first_real_value(options, exclude=a)
+            assert a is not None and b is not None
+            assert a != b, available
+
+
+def test_first_real_value_exclude_single_indicator_returns_default():
+    # Only one real indicator: excluding a's default leaves nothing selectable
+    # for b, so it returns default (None) -- no IndexError, no self-compare.
+    options = categories.build_grouped_options(['GDP'])
+    a = categories.first_real_value(options)
+    assert a == 'GDP'
+    assert categories.first_real_value(options, exclude=a) is None
+    assert categories.first_real_value(options, exclude=a, default='X') == 'X'
+
+
+def test_first_real_value_exclude_none_is_unchanged_behavior():
+    # exclude=None (the default) must not change the original behavior, including
+    # when None is itself a selectable value (str(None) != '__cat__...').
+    options = categories.build_grouped_options(['GDP', 'CPI'])
+    assert categories.first_real_value(options, exclude=None) == \
+        categories.first_real_value(options)
+
+
 # ---- (extra) the YOUR TURN UI hook is importable but unimplemented -----------
 
 def test_attach_grouped_dropdowns_is_a_your_turn_stub():

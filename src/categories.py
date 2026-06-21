@@ -111,7 +111,7 @@ def build_grouped_options(indicators, header_prefix='-- ', header_suffix=' --'):
     return options
 
 
-def first_real_value(options, default=None):
+def first_real_value(options, default=None, exclude=None):
     """Return the first SELECTABLE value in a Dash options list, else `default`.
 
     Given a :func:`build_grouped_options`-style ``list[dict]``, return the
@@ -126,6 +126,12 @@ def first_real_value(options, default=None):
     ``__cat__`` row would be a no-op / invalid default). An empty or ``None``
     `options` (or one that is ALL headers) returns `default`.
 
+    `exclude` lets a SECOND dropdown pick a default DISTINCT from the first: when
+    provided (not ``None``), an otherwise-selectable entry whose ``value`` equals
+    `exclude` is also skipped, so a compare pair never defaults both sides to the
+    same indicator (a degenerate self-comparison). If the only selectable value is
+    the excluded one (e.g. a single-indicator feed), `default` is returned.
+
     Pure stdlib -- no pandas / plotly / sqlite.
     """
     if not options:
@@ -135,6 +141,8 @@ def first_real_value(options, default=None):
             continue
         value = o.get('value')
         if str(value).startswith('__cat__'):
+            continue
+        if exclude is not None and value == exclude:
             continue
         return value
     return default
