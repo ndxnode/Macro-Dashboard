@@ -298,6 +298,23 @@ def test_describe_verb_below_negative_threshold_no_double_minus():
     assert alerts._describe_verb(pos) == 'anomalies below z=-3'   # byte-identical
 
 
+def test_describe_verb_below_zero_threshold_no_negative_zero():
+    # The panel's threshold Input is value=3.0/min=0, so the rule threshold is always
+    # a float and 0.0 is a reachable value. -abs(0.0) is IEEE -0.0, which :g renders
+    # "z=-0"; the verb must collapse that to "z=0" for int 0, float 0.0 AND -0.0.
+    for t in (0, 0.0, -0.0):
+        rule = alerts.AlertRule(indicator='X', kind='anomaly', direction='below',
+                                threshold=t)
+        assert alerts._describe_verb(rule) == 'anomalies below z=0', t
+
+
+def test_describe_verb_below_fractional_float_threshold():
+    # the :g path keeps a real fractional magnitude (and never double-minuses it).
+    rule = alerts.AlertRule(indicator='X', kind='anomaly', direction='below',
+                            threshold=-2.5)
+    assert alerts._describe_verb(rule) == 'anomalies below z=-2.5'
+
+
 # --- (k) build_alerts_payload: empty/None rules -> [] ------------------------
 
 def test_build_alerts_payload_empty_or_none_rules_is_empty_list():

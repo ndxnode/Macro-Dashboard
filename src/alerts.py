@@ -202,10 +202,13 @@ def _describe_verb(rule):
         # 'below' fires under the negative bound, so we render the negated magnitude
         # (-abs) rather than gluing a literal '-' onto an already-signed number --
         # this avoids "z=--3" when a degenerate/programmatic rule passes threshold<0.
+        # The `+ 0.0` collapses IEEE negative zero: -abs(0.0) is -0.0, which :g would
+        # render "z=-0"; the panel's threshold Input (value=3.0, min=0) is always a
+        # float and admits 0.0, so this is a reachable value, not just a degenerate one.
         # YOUR TURN: a future caller wanting the user's RAW signed threshold verbatim
         # (e.g. an explicit asymmetric band) has a documented seam here -- the current
         # contract is "below the negative |z| bound", not "below the raw signed z".
-        return f'anomalies below z={-abs(rule.threshold):g}'
+        return f'anomalies below z={-abs(rule.threshold) + 0.0:g}'
     return f'anomalies |z|>{thr}'  # 'both'
 
 
